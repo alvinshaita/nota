@@ -10,6 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib
 
 import dbus_common
+import fonts_util
 import settings as settings_module
 import storage
 import x11_utils
@@ -41,6 +42,7 @@ class NotaApplication(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        fonts_util.ensure_installed()
         self._launch_tray()
         x11_utils.watch_stacking_order(self._on_stacking_changed)
 
@@ -102,6 +104,12 @@ class NotaApplication(Adw.Application):
                 window.sync_state()
                 window.set_visible(False)
             self.save_all()
+
+    def apply_font_setting(self):
+        key = settings_module.load_settings().get("font_family", "system")
+        family = settings_module.FONT_CHOICES.get(key)
+        for window in self.windows.values():
+            window.apply_font(family)
 
     def _on_stacking_changed(self):
         xid_to_id = {}

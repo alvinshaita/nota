@@ -6,7 +6,18 @@ CONFIG_DIR = Path.home() / ".config" / "nota"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
 
 LEFT_CLICK_ACTIONS = ["toggle", "new_note", "nothing"]
-DEFAULT_SETTINGS = {"left_click_action": "toggle"}
+
+# key -> CSS font-family value (None = don't override, use the app's default)
+FONT_CHOICES = {
+    "system": None,
+    "virgil": "Virgil",
+}
+FONT_LABELS = {
+    "system": "System Default",
+    "virgil": "Virgil",
+}
+
+DEFAULT_SETTINGS = {"left_click_action": "toggle", "font_family": "system"}
 
 
 def load_settings():

@@ -5,6 +5,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk
 
+import settings as settings_module
 import storage
 import x11_utils
 
@@ -120,7 +121,11 @@ class NoteWindow(Adw.Window):
         self.text_view.get_buffer().connect("changed", self._queue_autosave)
         scroller.set_child(self.text_view)
 
+        self._font_family = None
         self._apply_color(self.note.get("color", storage.DEFAULT_COLOR))
+        self.apply_font(settings_module.FONT_CHOICES.get(
+            settings_module.load_settings().get("font_family", "system")
+        ))
 
         self.connect("close-request", self._on_close_request)
         self.connect("notify::default-width", self._queue_autosave)
@@ -186,12 +191,22 @@ class NoteWindow(Adw.Window):
 
     def _apply_color(self, hex_color):
         self.note["color"] = hex_color
+        self._refresh_css()
+
+    def apply_font(self, font_family):
+        self._font_family = font_family
+        self._refresh_css()
+
+    def _refresh_css(self):
+        hex_color = self.note.get("color", storage.DEFAULT_COLOR)
+        font_rule = f'font-family: "{self._font_family}";' if self._font_family else ""
         css = f"""
         .{self._css_class} {{ background-color: {hex_color}; }}
         .{self._css_class} textview.note-text,
         .{self._css_class} textview.note-text text {{
             background-color: {hex_color};
             color: #2b2b2b;
+            {font_rule}
         }}
         """
         self._css_provider.load_from_data(css.encode())
