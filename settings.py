@@ -17,7 +17,14 @@ FONT_LABELS = {
     "virgil": "Virgil",
 }
 
-DEFAULT_SETTINGS = {"left_click_action": "toggle", "font_family": "system"}
+# List of note ids that were open last time visibility was deliberately
+# changed (via a tray menu action or a note's own close button). None means
+# "no preference recorded yet" -- defaults to showing every note.
+DEFAULT_SETTINGS = {
+    "left_click_action": "toggle",
+    "font_family": "system",
+    "open_note_ids": None,
+}
 
 
 def load_settings():

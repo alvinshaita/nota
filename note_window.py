@@ -91,6 +91,13 @@ class NoteWindow(Adw.Window):
         color_btn.set_popover(self._build_color_popover())
         toolbar.append(color_btn)
 
+        self._group_popover = self._build_group_popover()
+        group_btn = Gtk.MenuButton(icon_name="tag-symbolic")
+        group_btn.set_tooltip_text("Add to group")
+        group_btn.add_css_class("flat")
+        group_btn.set_popover(self._group_popover)
+        toolbar.append(group_btn)
+
         spacer = Gtk.Box(hexpand=True)
         toolbar.append(spacer)
 
@@ -189,6 +196,54 @@ class NoteWindow(Adw.Window):
         self._queue_autosave()
         popover.popdown()
 
+    def _build_group_popover(self):
+        popover = Gtk.Popover()
+        popover.connect("show", self._refresh_group_popover)
+        return popover
+
+    def _refresh_group_popover(self, popover):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                       margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+        current_group = self.note.get("group")
+
+        none_btn = Gtk.Button(label=("✓ No Group" if not current_group else "No Group"))
+        none_btn.add_css_class("flat")
+        none_btn.connect("clicked", self._on_group_chosen, None, popover)
+        box.append(none_btn)
+
+        groups = self.app.get_all_groups()
+        if groups:
+            box.append(Gtk.Separator())
+            for group in groups:
+                label = f"✓ {group}" if group == current_group else group
+                btn = Gtk.Button(label=label)
+                btn.add_css_class("flat")
+                btn.connect("clicked", self._on_group_chosen, group, popover)
+                box.append(btn)
+
+        box.append(Gtk.Separator())
+        entry_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        entry = Gtk.Entry(placeholder_text="New group…")
+        entry.set_hexpand(True)
+        add_btn = Gtk.Button(icon_name="list-add-symbolic")
+        add_btn.connect("clicked", lambda *_: self._create_group_from_entry(entry, popover))
+        entry.connect("activate", lambda *_: self._create_group_from_entry(entry, popover))
+        entry_box.append(entry)
+        entry_box.append(add_btn)
+        box.append(entry_box)
+
+        popover.set_child(box)
+
+    def _create_group_from_entry(self, entry, popover):
+        name = entry.get_text().strip()
+        if name:
+            self._on_group_chosen(None, name, popover)
+
+    def _on_group_chosen(self, _button, group, popover):
+        self.note["group"] = group
+        self._queue_autosave()
+        popover.popdown()
+
     def _apply_color(self, hex_color):
         self.note["color"] = hex_color
         self._refresh_css()
@@ -240,8 +295,9 @@ class NoteWindow(Adw.Window):
 
     def _on_close_request(self, *_args):
         self.sync_state()
-        self.app.save_all()
         self.set_visible(False)
+        self.app.sync_open_ids()
+        self.app.save_all()
         return True
 
     def _on_delete_clicked(self, *_args):

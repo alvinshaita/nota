@@ -10,6 +10,10 @@ GtkStatusIcon is deprecated upstream but is what gives us real distinct
 left-click ("activate") vs right-click ("popup-menu") signals, matching how
 xpad's tray icon behaves; the modern AppIndicator/StatusNotifierItem stack
 routes single clicks of any button through the shell's own menu instead.
+
+The right-click menu lists groups and their notes read straight from
+notes.json (storage.py has no GTK dependency, so it's safe to import here
+even though this process runs GTK3 rather than the main app's GTK4).
 """
 import gi
 
@@ -17,6 +21,8 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gio, GLib, Gtk
 
 import dbus_common
+import settings as settings_module
+import storage
 
 ICON_NAME = "notes-app"
 
@@ -33,9 +39,10 @@ def get_proxy():
     )
 
 
-def call(proxy, method_name):
+def call(proxy, method_name, arg=None):
     try:
-        proxy.call_sync(method_name, None, Gio.DBusCallFlags.NONE, -1, None)
+        variant = GLib.Variant("(s)", (arg,)) if arg is not None else None
+        proxy.call_sync(method_name, variant, Gio.DBusCallFlags.NONE, -1, None)
     except GLib.Error as e:
         print(f"nota tray: D-Bus call {method_name} failed: {e}")
 
@@ -44,8 +51,57 @@ def on_activate(_icon, proxy):
     call(proxy, "LeftClickActivate")
 
 
+def _add_note_items(menu, notes, proxy, open_ids):
+    for note in notes:
+        label = storage.note_title(note)
+        if note["id"] in open_ids:
+            label = f"✓ {label}"
+        item = Gtk.MenuItem(label=label)
+        item.connect("activate", lambda _w, nid=note["id"]: call(proxy, "OpenNote", nid))
+        menu.append(item)
+
+
 def on_popup_menu(icon, button, activate_time, proxy):
+    notes = storage.load_notes()
+    groups, ungrouped = storage.groups_and_notes(notes)
+    saved_open_ids = settings_module.load_settings().get("open_note_ids")
+    open_ids = set(saved_open_ids) if saved_open_ids is not None else {n["id"] for n in notes}
+
     menu = Gtk.Menu()
+
+    all_item = Gtk.MenuItem(label="All Notes")
+    all_item.connect("activate", lambda *_: call(proxy, "OpenAllNotes"))
+    menu.append(all_item)
+
+    if groups or ungrouped:
+        menu.append(Gtk.SeparatorMenuItem())
+
+    for group_name, group_notes in groups.items():
+        group_item = Gtk.MenuItem(label=group_name)
+        submenu = Gtk.Menu()
+
+        open_add_item = Gtk.MenuItem(label=f"Open all in “{group_name}”")
+        open_add_item.connect("activate", lambda _w, g=group_name: call(proxy, "OpenGroup", g))
+        submenu.append(open_add_item)
+
+        open_only_item = Gtk.MenuItem(label=f"Open only “{group_name}”")
+        open_only_item.connect("activate", lambda _w, g=group_name: call(proxy, "OpenGroupOnly", g))
+        submenu.append(open_only_item)
+
+        submenu.append(Gtk.SeparatorMenuItem())
+        _add_note_items(submenu, group_notes, proxy, open_ids)
+
+        submenu.show_all()
+        group_item.set_submenu(submenu)
+        menu.append(group_item)
+
+    if ungrouped:
+        ungrouped_header = Gtk.MenuItem(label="Ungrouped")
+        ungrouped_header.set_sensitive(False)
+        menu.append(ungrouped_header)
+        _add_note_items(menu, ungrouped, proxy, open_ids)
+
+    menu.append(Gtk.SeparatorMenuItem())
 
     new_item = Gtk.MenuItem(label="New Note")
     new_item.connect("activate", lambda *_: call(proxy, "NewNote"))

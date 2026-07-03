@@ -70,7 +70,7 @@ class NotaApplication(Adw.Application):
         Adw.Application.do_dbus_unregister(self, connection, object_path)
 
     def _on_dbus_method_call(self, _connection, _sender, _object_path,
-                              _interface_name, method_name, _parameters, invocation):
+                              _interface_name, method_name, parameters, invocation):
         if method_name == "LeftClickActivate":
             self.handle_left_click()
         elif method_name == "NewNote":
@@ -79,6 +79,17 @@ class NotaApplication(Adw.Application):
             self.show_settings()
         elif method_name == "Quit":
             self.quit()
+        elif method_name == "OpenAllNotes":
+            self.open_all_notes()
+        elif method_name == "OpenGroup":
+            (group,) = parameters.unpack()
+            self.open_group_add(group)
+        elif method_name == "OpenGroupOnly":
+            (group,) = parameters.unpack()
+            self.open_group_only(group)
+        elif method_name == "OpenNote":
+            (note_id,) = parameters.unpack()
+            self.open_note(note_id)
         invocation.return_value(None)
 
     def _launch_tray(self):
@@ -95,15 +106,66 @@ class NotaApplication(Adw.Application):
     def toggle_visibility(self):
         self.notes_visible = not self.notes_visible
         if self.notes_visible:
-            for note in self.notes:
-                window = self.windows.get(note["id"])
-                if window is not None:
-                    window.present_at_position()
+            saved = settings_module.load_settings().get("open_note_ids")
+            target = saved if saved is not None else [n["id"] for n in self.notes]
+            self._apply_visible_set(target)
         else:
             for window in self.windows.values():
                 window.sync_state()
                 window.set_visible(False)
             self.save_all()
+
+    def _currently_visible_ids(self):
+        return [
+            n["id"] for n in self.notes
+            if self.windows.get(n["id"]) is not None and self.windows[n["id"]].get_visible()
+        ]
+
+    def _persist_open_ids(self, ids):
+        valid_ids = {n["id"] for n in self.notes}
+        current = settings_module.load_settings()
+        current["open_note_ids"] = [i for i in ids if i in valid_ids]
+        settings_module.save_settings(current)
+
+    def sync_open_ids(self):
+        """Recompute and persist the open set from actual current visibility.
+        Call after any visibility change that doesn't already go through
+        _apply_visible_set (e.g. a note's own close button)."""
+        self._persist_open_ids(self._currently_visible_ids())
+
+    def _apply_visible_set(self, target_ids):
+        target_set = set(target_ids)
+        for note in self.notes:
+            window = self.windows.get(note["id"])
+            if window is None:
+                continue
+            if note["id"] in target_set:
+                window.present_at_position()
+            else:
+                window.sync_state()
+                window.set_visible(False)
+        self.notes_visible = True
+        self._persist_open_ids(target_set)
+        self.save_all()
+
+    def open_all_notes(self):
+        self._apply_visible_set({n["id"] for n in self.notes})
+
+    def open_group_only(self, group):
+        ids = {n["id"] for n in self.notes if n.get("group") == group}
+        self._apply_visible_set(ids)
+
+    def open_group_add(self, group):
+        current = set(self._currently_visible_ids())
+        ids = {n["id"] for n in self.notes if n.get("group") == group}
+        self._apply_visible_set(current | ids)
+
+    def open_note(self, note_id):
+        current = set(self._currently_visible_ids())
+        self._apply_visible_set(current | {note_id})
+
+    def get_all_groups(self):
+        return sorted({n["group"] for n in self.notes if n.get("group")})
 
     def apply_font_setting(self):
         key = settings_module.load_settings().get("font_family", "system")
@@ -156,6 +218,7 @@ class NotaApplication(Adw.Application):
         self.notes.append(note)
         self._open_window(note)
         self.notes_visible = True
+        self.sync_open_ids()
         self.save_all()
 
     def _open_window(self, note):
@@ -166,6 +229,7 @@ class NotaApplication(Adw.Application):
     def delete_note(self, note_id):
         self.notes = [n for n in self.notes if n["id"] != note_id]
         self.windows.pop(note_id, None)
+        self.sync_open_ids()
         self.save_all()
 
     def save_all(self):

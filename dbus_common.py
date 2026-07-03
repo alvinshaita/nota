@@ -11,6 +11,16 @@ INTROSPECTION_XML = f"""
     <method name='NewNote'/>
     <method name='ShowSettings'/>
     <method name='Quit'/>
+    <method name='OpenAllNotes'/>
+    <method name='OpenGroup'>
+      <arg type='s' name='group' direction='in'/>
+    </method>
+    <method name='OpenGroupOnly'>
+      <arg type='s' name='group' direction='in'/>
+    </method>
+    <method name='OpenNote'>
+      <arg type='s' name='note_id' direction='in'/>
+    </method>
   </interface>
 </node>
 """
