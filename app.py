@@ -12,8 +12,11 @@ from gi.repository import Adw, Gio, GLib
 import dbus_common
 import settings as settings_module
 import storage
+import x11_utils
 from note_window import NoteWindow
 from settings_window import SettingsWindow
+
+STACKING_SAVE_DELAY_MS = 800
 
 APP_ID = dbus_common.BUS_NAME
 
@@ -27,6 +30,7 @@ class NotaApplication(Adw.Application):
         self.settings_window = None
         self._tray_process = None
         self._dbus_reg_id = None
+        self._stacking_save_source_id = None
 
         new_action = Gio.SimpleAction.new("new-note", None)
         new_action.connect("activate", lambda *_: self.create_note())
@@ -38,6 +42,7 @@ class NotaApplication(Adw.Application):
     def do_startup(self):
         Adw.Application.do_startup(self)
         self._launch_tray()
+        x11_utils.watch_stacking_order(self._on_stacking_changed)
 
     def do_activate(self):
         if not self.windows:
@@ -87,14 +92,46 @@ class NotaApplication(Adw.Application):
 
     def toggle_visibility(self):
         self.notes_visible = not self.notes_visible
-        for window in self.windows.values():
-            if self.notes_visible:
-                window.present_at_position()
-            else:
+        if self.notes_visible:
+            for note in self.notes:
+                window = self.windows.get(note["id"])
+                if window is not None:
+                    window.present_at_position()
+        else:
+            for window in self.windows.values():
                 window.sync_state()
                 window.set_visible(False)
-        if not self.notes_visible:
             self.save_all()
+
+    def _on_stacking_changed(self):
+        xid_to_id = {}
+        for note_id, window in self.windows.items():
+            if window.get_visible():
+                xid = x11_utils.get_xid(window)
+                if xid is not None:
+                    xid_to_id[xid] = note_id
+        order = x11_utils.get_stacking_order(list(xid_to_id.keys()))
+        if not order:
+            return
+        id_order = [xid_to_id[xid] for xid in order]
+        id_order_set = set(id_order)
+        notes_by_id = {n["id"]: n for n in self.notes}
+        untouched = [n for n in self.notes if n["id"] not in id_order_set]
+        reordered = [notes_by_id[i] for i in id_order]
+        self.notes = untouched + reordered
+        self._queue_save_all()
+
+    def _queue_save_all(self):
+        if self._stacking_save_source_id is not None:
+            GLib.source_remove(self._stacking_save_source_id)
+        self._stacking_save_source_id = GLib.timeout_add(
+            STACKING_SAVE_DELAY_MS, self._debounced_save_all
+        )
+
+    def _debounced_save_all(self):
+        self._stacking_save_source_id = None
+        self.save_all()
+        return GLib.SOURCE_REMOVE
 
     def show_settings(self):
         if self.settings_window is None:
