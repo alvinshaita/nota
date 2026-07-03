@@ -19,6 +19,29 @@ PALETTE = [
     "#f2f2f2",  # white/grey
 ]
 
+RESIZE_EDGE_THICKNESS = 6
+RESIZE_CORNER_SIZE = 14
+
+# (edge, cursor name, halign, valign, width, height)
+RESIZE_GRIPS = [
+    (Gdk.SurfaceEdge.NORTH, "n-resize", Gtk.Align.FILL, Gtk.Align.START,
+     -1, RESIZE_EDGE_THICKNESS),
+    (Gdk.SurfaceEdge.SOUTH, "s-resize", Gtk.Align.FILL, Gtk.Align.END,
+     -1, RESIZE_EDGE_THICKNESS),
+    (Gdk.SurfaceEdge.WEST, "w-resize", Gtk.Align.START, Gtk.Align.FILL,
+     RESIZE_EDGE_THICKNESS, -1),
+    (Gdk.SurfaceEdge.EAST, "e-resize", Gtk.Align.END, Gtk.Align.FILL,
+     RESIZE_EDGE_THICKNESS, -1),
+    (Gdk.SurfaceEdge.NORTH_WEST, "nw-resize", Gtk.Align.START, Gtk.Align.START,
+     RESIZE_CORNER_SIZE, RESIZE_CORNER_SIZE),
+    (Gdk.SurfaceEdge.NORTH_EAST, "ne-resize", Gtk.Align.END, Gtk.Align.START,
+     RESIZE_CORNER_SIZE, RESIZE_CORNER_SIZE),
+    (Gdk.SurfaceEdge.SOUTH_WEST, "sw-resize", Gtk.Align.START, Gtk.Align.END,
+     RESIZE_CORNER_SIZE, RESIZE_CORNER_SIZE),
+    (Gdk.SurfaceEdge.SOUTH_EAST, "se-resize", Gtk.Align.END, Gtk.Align.END,
+     RESIZE_CORNER_SIZE, RESIZE_CORNER_SIZE),
+]
+
 
 class NoteWindow(Adw.Window):
     def __init__(self, app, note_data, on_delete):
@@ -35,7 +58,12 @@ class NoteWindow(Adw.Window):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.add_css_class(self._css_class)
-        self.set_content(root)
+
+        overlay = Gtk.Overlay()
+        overlay.set_child(root)
+        for edge, cursor_name, halign, valign, width, height in RESIZE_GRIPS:
+            overlay.add_overlay(self._make_resize_grip(edge, cursor_name, halign, valign, width, height))
+        self.set_content(overlay)
 
         handle = Gtk.WindowHandle()
         root.append(handle)
@@ -111,6 +139,27 @@ class NoteWindow(Adw.Window):
         self.note["x"] = x
         self.note["y"] = y
         self._queue_autosave()
+
+    def _make_resize_grip(self, edge, cursor_name, halign, valign, width, height):
+        grip = Gtk.Box()
+        grip.set_size_request(width, height)
+        grip.set_halign(halign)
+        grip.set_valign(valign)
+        grip.set_cursor(Gdk.Cursor.new_from_name(cursor_name))
+
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+        gesture.connect("pressed", self._on_resize_pressed, edge)
+        grip.add_controller(gesture)
+        return grip
+
+    def _on_resize_pressed(self, gesture, _n_press, x, y, edge):
+        widget = gesture.get_widget()
+        surface = self.get_surface()
+        device = gesture.get_device()
+        button = gesture.get_current_button()
+        sx, sy = widget.translate_coordinates(self, x, y)
+        surface.begin_resize(edge, device, button, sx, sy, Gdk.CURRENT_TIME)
 
     def _build_color_popover(self):
         popover = Gtk.Popover()
