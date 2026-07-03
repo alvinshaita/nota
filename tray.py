@@ -73,6 +73,10 @@ def on_popup_menu(icon, button, activate_time, proxy):
     all_item.connect("activate", lambda *_: call(proxy, "OpenAllNotes"))
     menu.append(all_item)
 
+    close_all_item = Gtk.MenuItem(label="Close All Notes")
+    close_all_item.connect("activate", lambda *_: call(proxy, "CloseAllNotes"))
+    menu.append(close_all_item)
+
     if groups or ungrouped:
         menu.append(Gtk.SeparatorMenuItem())
 

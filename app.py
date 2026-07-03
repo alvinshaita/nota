@@ -81,6 +81,8 @@ class NotaApplication(Adw.Application):
             self.quit()
         elif method_name == "OpenAllNotes":
             self.open_all_notes()
+        elif method_name == "CloseAllNotes":
+            self.close_all_notes()
         elif method_name == "OpenGroup":
             (group,) = parameters.unpack()
             self.open_group_add(group)
@@ -150,6 +152,13 @@ class NotaApplication(Adw.Application):
 
     def open_all_notes(self):
         self._apply_visible_set({n["id"] for n in self.notes})
+
+    def close_all_notes(self):
+        for window in self.windows.values():
+            window.sync_state()
+            window.set_visible(False)
+        self.notes_visible = False
+        self.save_all()
 
     def open_group_only(self, group):
         ids = {n["id"] for n in self.notes if n.get("group") == group}
