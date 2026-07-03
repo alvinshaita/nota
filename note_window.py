@@ -159,8 +159,9 @@ class NoteWindow(Adw.Window):
     def _on_close_request(self, *_args):
         self.sync_state()
         self.app.save_all()
-        return False
+        self.set_visible(False)
+        return True
 
     def _on_delete_clicked(self, *_args):
         self._on_delete(self.note["id"])
-        self.close()
+        self.destroy()
