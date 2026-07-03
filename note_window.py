@@ -3,9 +3,10 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 import storage
+import x11_utils
 
 AUTOSAVE_DELAY_MS = 800
 
@@ -96,6 +97,20 @@ class NoteWindow(Adw.Window):
         self.connect("close-request", self._on_close_request)
         self.connect("notify::default-width", self._queue_autosave)
         self.connect("notify::default-height", self._queue_autosave)
+        self.connect("realize", self._on_realize)
+        self.connect("destroy", lambda *_: x11_utils.unwatch_position(self))
+
+    def present_at_position(self):
+        self.present()
+        x11_utils.move_window(self, self.note["x"], self.note["y"])
+
+    def _on_realize(self, *_args):
+        x11_utils.watch_position(self, self._on_position_changed)
+
+    def _on_position_changed(self, x, y):
+        self.note["x"] = x
+        self.note["y"] = y
+        self._queue_autosave()
 
     def _build_color_popover(self):
         popover = Gtk.Popover()
@@ -155,6 +170,9 @@ class NoteWindow(Adw.Window):
             self.note["width"] = width
         if height > 0:
             self.note["height"] = height
+        position = x11_utils.get_position(self)
+        if position is not None:
+            self.note["x"], self.note["y"] = position
 
     def _on_close_request(self, *_args):
         self.sync_state()

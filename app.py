@@ -89,9 +89,12 @@ class NotaApplication(Adw.Application):
         self.notes_visible = not self.notes_visible
         for window in self.windows.values():
             if self.notes_visible:
-                window.present()
+                window.present_at_position()
             else:
+                window.sync_state()
                 window.set_visible(False)
+        if not self.notes_visible:
+            self.save_all()
 
     def show_settings(self):
         if self.settings_window is None:
@@ -113,7 +116,7 @@ class NotaApplication(Adw.Application):
     def _open_window(self, note):
         window = NoteWindow(self, note, on_delete=self.delete_note)
         self.windows[note["id"]] = window
-        window.present()
+        window.present_at_position()
 
     def delete_note(self, note_id):
         self.notes = [n for n in self.notes if n["id"] != note_id]
