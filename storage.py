@@ -42,6 +42,7 @@ def new_note(x=100, y=100, width=260, height=260, color=DEFAULT_COLOR, text="", 
         "height": height,
         "color": color,
         "group": group,
+        "formatting": {},
     }
 
 

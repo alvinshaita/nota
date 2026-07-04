@@ -21,6 +21,11 @@ STACKING_SAVE_DELAY_MS = 800
 
 APP_ID = dbus_common.BUS_NAME
 
+NEW_NOTE_BASE_X = 100
+NEW_NOTE_BASE_Y = 100
+NEW_NOTE_CASCADE_STEP = 30
+NEW_NOTE_CASCADE_STEPS = 10
+
 
 class NotaApplication(Adw.Application):
     def __init__(self):
@@ -32,6 +37,7 @@ class NotaApplication(Adw.Application):
         self._tray_process = None
         self._dbus_reg_id = None
         self._stacking_save_source_id = None
+        self._cascade_index = 0
 
         new_action = Gio.SimpleAction.new("new-note", None)
         new_action.connect("activate", lambda *_: self.create_note())
@@ -182,6 +188,19 @@ class NotaApplication(Adw.Application):
         for window in self.windows.values():
             window.apply_font(family)
 
+    def apply_line_spacing_setting(self):
+        current = settings_module.load_settings()
+        pixels_above = current.get("pixels_above_lines", 0)
+        pixels_inside_wrap = current.get("pixels_inside_wrap", 0)
+        line_height = current.get("line_height", 1.0)
+        for window in self.windows.values():
+            window.apply_line_spacing(pixels_above, pixels_inside_wrap, line_height)
+
+    def apply_font_size_setting(self):
+        size = settings_module.load_settings().get("font_size", 0)
+        for window in self.windows.values():
+            window.apply_font_size(size)
+
     def _on_stacking_changed(self):
         xid_to_id = {}
         for note_id, window in self.windows.items():
@@ -223,12 +242,21 @@ class NotaApplication(Adw.Application):
         return False
 
     def create_note(self):
-        note = storage.new_note()
+        x, y = self._next_cascade_position()
+        current_settings = settings_module.load_settings()
+        width = current_settings.get("default_note_width", 260)
+        height = current_settings.get("default_note_height", 260)
+        note = storage.new_note(x=x, y=y, width=width, height=height)
         self.notes.append(note)
         self._open_window(note)
         self.notes_visible = True
         self.sync_open_ids()
         self.save_all()
+
+    def _next_cascade_position(self):
+        self._cascade_index = (self._cascade_index + 1) % NEW_NOTE_CASCADE_STEPS
+        offset = self._cascade_index * NEW_NOTE_CASCADE_STEP
+        return NEW_NOTE_BASE_X + offset, NEW_NOTE_BASE_Y + offset
 
     def _open_window(self, note):
         window = NoteWindow(self, note, on_delete=self.delete_note)

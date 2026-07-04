@@ -24,6 +24,12 @@ DEFAULT_SETTINGS = {
     "left_click_action": "toggle",
     "font_family": "system",
     "open_note_ids": None,
+    "pixels_above_lines": 0,
+    "pixels_inside_wrap": 0,
+    "line_height": 1.0,
+    "font_size": 0,  # 0 = don't override, use the app's default
+    "default_note_width": 260,
+    "default_note_height": 260,
 }
 
 

@@ -3,13 +3,83 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk
+gi.require_version("Graphene", "1.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Graphene, Pango
 
 import settings as settings_module
 import storage
 import x11_utils
 
 AUTOSAVE_DELAY_MS = 800
+
+FORMAT_TAGS = ["bold", "italic", "underline", "strikethrough"]
+FORMAT_SHORTCUTS = {
+    "bold": ["<Primary>b"],
+    "italic": ["<Primary>i"],
+    "underline": ["<Primary>u"],
+    "strikethrough": ["<Primary><Shift>x"],
+}
+
+UNDERLINE_COLOR = Gdk.RGBA()
+UNDERLINE_COLOR.parse("#2b2b2b")
+
+
+class FormattedTextView(Gtk.TextView):
+    """Plain Gtk.TextView, except underline is hand-drawn via the snapshot
+    layer API instead of relying on Pango's underline attribute -- which,
+    in this environment's GTK4/Pango build, silently fails to render unless
+    the run also has another attribute (e.g. bold) changing. Strikethrough,
+    bold and italic all render fine through the normal Pango path; this
+    workaround is scoped to underline only."""
+
+    def do_snapshot_layer(self, layer, snapshot):
+        if layer != Gtk.TextViewLayer.ABOVE_TEXT:
+            return
+        buf = self.get_buffer()
+        tag = buf.get_tag_table().lookup("underline")
+        if tag is None:
+            return
+        it = buf.get_start_iter()
+        in_range = False
+        range_start = None
+        while True:
+            has = it.has_tag(tag)
+            if has and not in_range:
+                range_start = it.copy()
+                in_range = True
+            elif not has and in_range:
+                self._draw_underline_range(snapshot, range_start, it)
+                in_range = False
+            if not it.forward_char():
+                break
+        if in_range:
+            self._draw_underline_range(snapshot, range_start, buf.get_end_iter())
+
+    def _draw_underline_range(self, snapshot, start_it, end_it):
+        bold_tag = self.get_buffer().get_tag_table().lookup("bold")
+        it = start_it.copy()
+        seg_x = seg_y = seg_h = seg_bold = None
+        seg_right = None
+        while it.compare(end_it) < 0:
+            rect = self.get_iter_location(it)
+            wx, wy = self.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
+            is_bold = bold_tag is not None and it.has_tag(bold_tag)
+            if seg_x is None:
+                seg_x, seg_y, seg_h, seg_bold = wx, wy, rect.height, is_bold
+            elif wy != seg_y or is_bold != seg_bold:
+                self._append_underline_rect(snapshot, seg_x, seg_y, seg_right - seg_x, seg_h, seg_bold)
+                seg_x, seg_y, seg_h, seg_bold = wx, wy, rect.height, is_bold
+            seg_right = wx + rect.width
+            if not it.forward_char():
+                break
+        if seg_x is not None:
+            self._append_underline_rect(snapshot, seg_x, seg_y, seg_right - seg_x, seg_h, seg_bold)
+
+    def _append_underline_rect(self, snapshot, x, y, width, height, is_bold=False):
+        thickness = 2 if is_bold else 1
+        rect = Graphene.Rect.alloc()
+        rect.init(x, y + height * 0.4, max(width, 1), thickness)
+        snapshot.append_color(UNDERLINE_COLOR, rect)
 
 PALETTE = [
     "#f9e08a",  # yellow
@@ -116,7 +186,7 @@ class NoteWindow(Adw.Window):
         scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
         root.append(scroller)
 
-        self.text_view = Gtk.TextView(
+        self.text_view = FormattedTextView(
             wrap_mode=Gtk.WrapMode.WORD_CHAR,
             top_margin=8,
             bottom_margin=8,
@@ -128,11 +198,22 @@ class NoteWindow(Adw.Window):
         self.text_view.get_buffer().connect("changed", self._queue_autosave)
         scroller.set_child(self.text_view)
 
+        self._setup_formatting()
+
         self._font_family = None
+        self._line_height = 1.0
+        self._font_size = 0
         self._apply_color(self.note.get("color", storage.DEFAULT_COLOR))
+        current_settings = settings_module.load_settings()
         self.apply_font(settings_module.FONT_CHOICES.get(
-            settings_module.load_settings().get("font_family", "system")
+            current_settings.get("font_family", "system")
         ))
+        self.apply_line_spacing(
+            current_settings.get("pixels_above_lines", 0),
+            current_settings.get("pixels_inside_wrap", 0),
+            current_settings.get("line_height", 1.0),
+        )
+        self.apply_font_size(current_settings.get("font_size", 0))
 
         self.connect("close-request", self._on_close_request)
         self.connect("notify::default-width", self._queue_autosave)
@@ -244,6 +325,93 @@ class NoteWindow(Adw.Window):
         self._queue_autosave()
         popover.popdown()
 
+    def _setup_formatting(self):
+        buf = self.text_view.get_buffer()
+        buf.create_tag("bold", weight=Pango.Weight.BOLD)
+        buf.create_tag("italic", style=Pango.Style.ITALIC)
+        buf.create_tag("underline")
+        buf.create_tag("strikethrough", strikethrough=True)
+        self._apply_formatting(self.note.get("formatting"))
+
+        action_group = Gio.SimpleActionGroup()
+        shortcut_controller = Gtk.ShortcutController()
+        shortcut_controller.set_scope(Gtk.ShortcutScope.LOCAL)
+        for name in FORMAT_TAGS:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", self._on_toggle_format, name)
+            action_group.add_action(action)
+            for accel in FORMAT_SHORTCUTS[name]:
+                trigger = Gtk.ShortcutTrigger.parse_string(accel)
+                named_action = Gtk.NamedAction.new(f"format.{name}")
+                shortcut_controller.add_shortcut(Gtk.Shortcut.new(trigger, named_action))
+        self.text_view.insert_action_group("format", action_group)
+        self.text_view.add_controller(shortcut_controller)
+
+        menu_model = Gio.Menu()
+        menu_model.append("Bold", "format.bold")
+        menu_model.append("Italic", "format.italic")
+        menu_model.append("Underline", "format.underline")
+        menu_model.append("Strikethrough", "format.strikethrough")
+        self.text_view.set_extra_menu(menu_model)
+
+    def _on_toggle_format(self, _action, _param, tag_name):
+        buf = self.text_view.get_buffer()
+        bounds = buf.get_selection_bounds()
+        if not bounds:
+            return
+        start, end = bounds
+        tag = buf.get_tag_table().lookup(tag_name)
+        if self._selection_fully_tagged(buf, tag, start, end):
+            buf.remove_tag(tag, start, end)
+        else:
+            buf.apply_tag(tag, start, end)
+        self._queue_autosave()
+
+    def _selection_fully_tagged(self, buf, tag, start, end):
+        it = start.copy()
+        while it.compare(end) < 0:
+            if not it.has_tag(tag):
+                return False
+            if not it.forward_char():
+                break
+        return True
+
+    def _serialize_formatting(self):
+        buf = self.text_view.get_buffer()
+        result = {}
+        for name in FORMAT_TAGS:
+            tag = buf.get_tag_table().lookup(name)
+            ranges = []
+            it = buf.get_start_iter()
+            in_range = False
+            range_start = 0
+            while True:
+                has = it.has_tag(tag)
+                if has and not in_range:
+                    range_start = it.get_offset()
+                    in_range = True
+                elif not has and in_range:
+                    ranges.append([range_start, it.get_offset()])
+                    in_range = False
+                if not it.forward_char():
+                    break
+            if in_range:
+                ranges.append([range_start, buf.get_end_iter().get_offset()])
+            if ranges:
+                result[name] = ranges
+        return result
+
+    def _apply_formatting(self, formatting):
+        buf = self.text_view.get_buffer()
+        for name, ranges in (formatting or {}).items():
+            tag = buf.get_tag_table().lookup(name)
+            if tag is None:
+                continue
+            for start_off, end_off in ranges:
+                start_it = buf.get_iter_at_offset(start_off)
+                end_it = buf.get_iter_at_offset(end_off)
+                buf.apply_tag(tag, start_it, end_it)
+
     def _apply_color(self, hex_color):
         self.note["color"] = hex_color
         self._refresh_css()
@@ -252,9 +420,23 @@ class NoteWindow(Adw.Window):
         self._font_family = font_family
         self._refresh_css()
 
+    def apply_line_spacing(self, pixels_above_lines, pixels_inside_wrap, line_height):
+        self.text_view.set_pixels_above_lines(pixels_above_lines)
+        self.text_view.set_pixels_inside_wrap(pixels_inside_wrap)
+        self._line_height = line_height
+        self._refresh_css()
+
+    def apply_font_size(self, size):
+        self._font_size = size
+        self._refresh_css()
+
     def _refresh_css(self):
         hex_color = self.note.get("color", storage.DEFAULT_COLOR)
         font_rule = f'font-family: "{self._font_family}";' if self._font_family else ""
+        line_height_rule = (
+            f"line-height: {self._line_height};" if self._line_height != 1.0 else ""
+        )
+        font_size_rule = f"font-size: {self._font_size}pt;" if self._font_size else ""
         css = f"""
         .{self._css_class} {{ background-color: {hex_color}; }}
         .{self._css_class} textview.note-text,
@@ -262,6 +444,8 @@ class NoteWindow(Adw.Window):
             background-color: {hex_color};
             color: #2b2b2b;
             {font_rule}
+            {line_height_rule}
+            {font_size_rule}
         }}
         """
         self._css_provider.load_from_data(css.encode())
@@ -284,6 +468,7 @@ class NoteWindow(Adw.Window):
     def sync_state(self):
         buf = self.text_view.get_buffer()
         self.note["text"] = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        self.note["formatting"] = self._serialize_formatting()
         width, height = self.get_default_size()
         if width > 0:
             self.note["width"] = width
