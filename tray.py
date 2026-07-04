@@ -98,10 +98,16 @@ def on_popup_menu(icon, button, activate_time, proxy):
         menu.append(group_item)
 
     if ungrouped:
-        ungrouped_header = Gtk.MenuItem(label="Ungrouped")
-        ungrouped_header.set_sensitive(False)
-        menu.append(ungrouped_header)
-        _add_note_items(menu, ungrouped, proxy, open_ids)
+        ungrouped_item = Gtk.MenuItem()
+        ungrouped_label = Gtk.Label(label="Ungrouped")
+        ungrouped_label.set_markup("<i>Ungrouped</i>")
+        ungrouped_label.set_xalign(0)
+        ungrouped_item.add(ungrouped_label)
+        ungrouped_submenu = Gtk.Menu()
+        _add_note_items(ungrouped_submenu, ungrouped, proxy, open_ids)
+        ungrouped_submenu.show_all()
+        ungrouped_item.set_submenu(ungrouped_submenu)
+        menu.append(ungrouped_item)
 
     menu.append(Gtk.SeparatorMenuItem())
 
