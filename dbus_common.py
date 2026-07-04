@@ -22,6 +22,9 @@ INTROSPECTION_XML = f"""
     <method name='OpenNote'>
       <arg type='s' name='note_id' direction='in'/>
     </method>
+    <method name='ToggleNote'>
+      <arg type='s' name='note_id' direction='in'/>
+    </method>
   </interface>
 </node>
 """

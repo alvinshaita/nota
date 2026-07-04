@@ -98,6 +98,9 @@ class NotaApplication(Adw.Application):
         elif method_name == "OpenNote":
             (note_id,) = parameters.unpack()
             self.open_note(note_id)
+        elif method_name == "ToggleNote":
+            (note_id,) = parameters.unpack()
+            self.toggle_note(note_id)
         invocation.return_value(None)
 
     def _launch_tray(self):
@@ -178,6 +181,17 @@ class NotaApplication(Adw.Application):
     def open_note(self, note_id):
         current = set(self._currently_visible_ids())
         self._apply_visible_set(current | {note_id})
+
+    def toggle_note(self, note_id):
+        window = self.windows.get(note_id)
+        if window is None:
+            return
+        current = set(self._currently_visible_ids())
+        if note_id in current:
+            current.discard(note_id)
+        else:
+            current.add(note_id)
+        self._apply_visible_set(current)
 
     def get_all_groups(self):
         return sorted({n["group"] for n in self.notes if n.get("group")})

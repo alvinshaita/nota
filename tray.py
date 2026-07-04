@@ -53,11 +53,9 @@ def on_activate(_icon, proxy):
 
 def _add_note_items(menu, notes, proxy, open_ids):
     for note in notes:
-        label = storage.note_title(note)
-        if note["id"] in open_ids:
-            label = f"✓ {label}"
-        item = Gtk.MenuItem(label=label)
-        item.connect("activate", lambda _w, nid=note["id"]: call(proxy, "OpenNote", nid))
+        item = Gtk.CheckMenuItem(label=storage.note_title(note))
+        item.set_active(note["id"] in open_ids)
+        item.connect("toggled", lambda _w, nid=note["id"]: call(proxy, "ToggleNote", nid))
         menu.append(item)
 
 
