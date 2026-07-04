@@ -101,6 +101,24 @@ def move_window(gtk_window, x, y):
     GLib.idle_add(_do_move)
 
 
+def raise_window(gtk_window):
+    """Force gtk_window to the top of the X11 stack via a raw ConfigureWindow
+    restack, bypassing GTK's present()/gdk_toplevel_focus() -- mutter's
+    focus-stealing prevention silently ignores present() calls that don't
+    originate from direct user input, which a plain restack isn't subject to."""
+    if not is_x11():
+        return
+    try:
+        from Xlib import X
+
+        xwin = _get_xlib_window(gtk_window)
+        if xwin is not None:
+            xwin.configure(stack_mode=X.Above)
+            _get_xlib_display().sync()
+    except Exception:
+        pass
+
+
 class _EventRouter:
     """Watches X11 events relevant to note windows and dispatches them:
 

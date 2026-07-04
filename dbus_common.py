@@ -10,6 +10,7 @@ INTROSPECTION_XML = f"""
     <method name='LeftClickActivate'/>
     <method name='NewNote'/>
     <method name='ShowSettings'/>
+    <method name='ShowNoteManager'/>
     <method name='Quit'/>
     <method name='OpenAllNotes'/>
     <method name='CloseAllNotes'/>

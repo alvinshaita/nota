@@ -115,6 +115,10 @@ def on_popup_menu(icon, button, activate_time, proxy):
     new_item.connect("activate", lambda *_: call(proxy, "NewNote"))
     menu.append(new_item)
 
+    manage_item = Gtk.MenuItem(label="Manage Notes…")
+    manage_item.connect("activate", lambda *_: call(proxy, "ShowNoteManager"))
+    menu.append(manage_item)
+
     settings_item = Gtk.MenuItem(label="Settings")
     settings_item.connect("activate", lambda *_: call(proxy, "ShowSettings"))
     menu.append(settings_item)

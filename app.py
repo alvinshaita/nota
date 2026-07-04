@@ -14,6 +14,7 @@ import fonts_util
 import settings as settings_module
 import storage
 import x11_utils
+from note_manager_window import NoteManagerWindow
 from note_window import NoteWindow
 from settings_window import SettingsWindow
 
@@ -34,6 +35,7 @@ class NotaApplication(Adw.Application):
         self.windows = {}
         self.notes_visible = True
         self.settings_window = None
+        self.note_manager_window = None
         self._tray_process = None
         self._dbus_reg_id = None
         self._stacking_save_source_id = None
@@ -83,6 +85,8 @@ class NotaApplication(Adw.Application):
             self.create_note()
         elif method_name == "ShowSettings":
             self.show_settings()
+        elif method_name == "ShowNoteManager":
+            self.show_note_manager()
         elif method_name == "Quit":
             self.quit()
         elif method_name == "OpenAllNotes":
@@ -132,6 +136,9 @@ class NotaApplication(Adw.Application):
             if self.windows.get(n["id"]) is not None and self.windows[n["id"]].get_visible()
         ]
 
+    def get_open_note_ids(self):
+        return set(self._currently_visible_ids())
+
     def _persist_open_ids(self, ids):
         valid_ids = {n["id"] for n in self.notes}
         current = settings_module.load_settings()
@@ -150,14 +157,22 @@ class NotaApplication(Adw.Application):
             window = self.windows.get(note["id"])
             if window is None:
                 continue
+            was_visible = window.get_visible()
             if note["id"] in target_set:
-                window.present_at_position()
-            else:
+                if not was_visible:
+                    window.present_at_position()
+            elif was_visible:
                 window.sync_state()
                 window.set_visible(False)
         self.notes_visible = True
         self._persist_open_ids(target_set)
         self.save_all()
+        if self.note_manager_window is not None:
+            self.note_manager_window._refresh()
+            # Newly-shown note windows map asynchronously (round-trip through
+            # the WM) and can land on top of the stack after this point --
+            # _on_stacking_changed re-raises the manager once that settles.
+            self.note_manager_window.present()
 
     def open_all_notes(self):
         self._apply_visible_set({n["id"] for n in self.notes})
@@ -222,6 +237,16 @@ class NotaApplication(Adw.Application):
                 xid = x11_utils.get_xid(window)
                 if xid is not None:
                     xid_to_id[xid] = note_id
+
+        if self.note_manager_window is not None and self.note_manager_window.get_visible():
+            manager_xid = x11_utils.get_xid(self.note_manager_window)
+            if manager_xid is not None:
+                combined_order = x11_utils.get_stacking_order(
+                    list(xid_to_id.keys()) + [manager_xid]
+                )
+                if combined_order and combined_order[-1] != manager_xid:
+                    x11_utils.raise_window(self.note_manager_window)
+
         order = x11_utils.get_stacking_order(list(xid_to_id.keys()))
         if not order:
             return
@@ -253,6 +278,18 @@ class NotaApplication(Adw.Application):
 
     def _on_settings_closed(self, *_args):
         self.settings_window = None
+        return False
+
+    def show_note_manager(self):
+        if self.note_manager_window is None:
+            self.note_manager_window = NoteManagerWindow(self)
+            self.note_manager_window.connect("close-request", self._on_note_manager_closed)
+        else:
+            self.note_manager_window._refresh()
+        self.note_manager_window.present()
+
+    def _on_note_manager_closed(self, *_args):
+        self.note_manager_window = None
         return False
 
     def create_note(self):
