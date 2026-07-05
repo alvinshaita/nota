@@ -230,6 +230,11 @@ class NotaApplication(Adw.Application):
         for window in self.windows.values():
             window.apply_font_size(size)
 
+    def apply_auto_bullet_setting(self):
+        enabled = settings_module.load_settings().get("auto_bullet_lists", True)
+        for window in self.windows.values():
+            window.apply_auto_bullet_lists(enabled)
+
     def _on_stacking_changed(self):
         xid_to_id = {}
         for note_id, window in self.windows.items():

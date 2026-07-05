@@ -35,6 +35,7 @@ def save_notes(notes):
 def new_note(x=100, y=100, width=260, height=260, color=DEFAULT_COLOR, text="", group=None):
     return {
         "id": str(uuid.uuid4()),
+        "title": "",
         "text": text,
         "x": x,
         "y": y,
@@ -47,6 +48,9 @@ def new_note(x=100, y=100, width=260, height=260, color=DEFAULT_COLOR, text="", 
 
 
 def note_title(note):
+    title = note.get("title", "").strip()
+    if title:
+        return title[:40]
     first_line = next((line.strip() for line in note.get("text", "").splitlines() if line.strip()), "")
     if not first_line:
         return "Untitled note"

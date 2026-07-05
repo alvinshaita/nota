@@ -98,6 +98,31 @@ class SettingsWindow(Adw.PreferencesWindow):
             1.0, 3.0, 0.1, 2, "line_height", self.app.apply_line_spacing_setting,
         )
 
+        editing_group = Adw.PreferencesGroup(title="Editing")
+        layout_page.add(editing_group)
+
+        self._add_switch_row(
+            editing_group, "Auto-convert \"- \" to bullet lists",
+            settings_now.get("auto_bullet_lists", True),
+            "auto_bullet_lists", self.app.apply_auto_bullet_setting,
+        )
+
+    def _add_switch_row(self, group, title, value, key, apply_callback):
+        row = Adw.ActionRow(title=title)
+        switch = Gtk.Switch(active=value, valign=Gtk.Align.CENTER)
+        switch.connect("notify::active", self._on_switch_changed, key, apply_callback)
+        row.add_suffix(switch)
+        row.set_activatable_widget(switch)
+        group.add(row)
+        return switch
+
+    def _on_switch_changed(self, switch, _param, key, apply_callback):
+        current = settings_module.load_settings()
+        current[key] = switch.get_active()
+        settings_module.save_settings(current)
+        if apply_callback is not None:
+            apply_callback()
+
     def _add_spin_row(self, group, title, value, lower, upper, step, digits, key, apply_callback):
         row = Adw.ActionRow(title=title)
         adjustment = Gtk.Adjustment(value=value, lower=lower, upper=upper, step_increment=step)

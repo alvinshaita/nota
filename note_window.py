@@ -81,6 +81,8 @@ class FormattedTextView(Gtk.TextView):
         rect.init(x, y + height * 0.4, max(width, 1), thickness)
         snapshot.append_color(UNDERLINE_COLOR, rect)
 
+BULLET = "• "
+
 PALETTE = [
     "#f9e08a",  # yellow
     "#a8e6a1",  # green
@@ -138,6 +140,18 @@ class NoteWindow(Adw.Window):
 
         handle = Gtk.WindowHandle()
         root.append(handle)
+
+        self.title_entry = Gtk.Entry()
+        self.title_entry.set_placeholder_text("Title")
+        self.title_entry.set_text(self.note.get("title", ""))
+        self.title_entry.set_has_frame(False)
+        self.title_entry.set_hexpand(True)
+        self.title_entry.add_css_class("note-title")
+        self.title_entry.set_margin_start(10)
+        self.title_entry.set_margin_end(10)
+        self.title_entry.set_margin_bottom(2)
+        self.title_entry.connect("changed", self._on_title_changed)
+        root.append(self.title_entry)
 
         toolbar = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -214,6 +228,7 @@ class NoteWindow(Adw.Window):
             current_settings.get("line_height", 1.0),
         )
         self.apply_font_size(current_settings.get("font_size", 0))
+        self._setup_auto_bullet_lists(current_settings.get("auto_bullet_lists", True))
 
         self.connect("close-request", self._on_close_request)
         self.connect("notify::default-width", self._queue_autosave)
@@ -430,6 +445,46 @@ class NoteWindow(Adw.Window):
         self._font_size = size
         self._refresh_css()
 
+    def _setup_auto_bullet_lists(self, enabled):
+        self._auto_bullet_lists = enabled
+        self.text_view.get_buffer().connect_after("insert-text", self._maybe_convert_to_bullet)
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.connect("key-pressed", self._on_text_key_pressed)
+        self.text_view.add_controller(key_controller)
+        self._bullet_key_controller = key_controller
+
+    def apply_auto_bullet_lists(self, enabled):
+        self._auto_bullet_lists = enabled
+
+    def _maybe_convert_to_bullet(self, buf, location, text, _length):
+        if not self._auto_bullet_lists or text != " ":
+            return
+        line_start = location.copy()
+        line_start.set_line_offset(0)
+        prefix = buf.get_text(line_start, location, False)
+        if prefix == "- ":
+            buf.delete(line_start, location)
+            buf.insert(line_start, BULLET)
+
+    def _on_text_key_pressed(self, _controller, keyval, _keycode, _state):
+        if not self._auto_bullet_lists:
+            return False
+        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            return False
+        buf = self.text_view.get_buffer()
+        cursor = buf.get_iter_at_mark(buf.get_insert())
+        line_start = cursor.copy()
+        line_start.set_line_offset(0)
+        line_text = buf.get_text(line_start, cursor, False)
+        if not line_text.startswith(BULLET):
+            return False
+        if line_text[len(BULLET):].strip() == "":
+            # Empty bullet -- exit the list instead of continuing it.
+            buf.delete(line_start, cursor)
+            return False
+        buf.insert(cursor, "\n" + BULLET)
+        return True
+
     def _refresh_css(self):
         hex_color = self.note.get("color", storage.DEFAULT_COLOR)
         font_rule = f'font-family: "{self._font_family}";' if self._font_family else ""
@@ -447,12 +502,30 @@ class NoteWindow(Adw.Window):
             {line_height_rule}
             {font_size_rule}
         }}
+        .{self._css_class} entry.note-title,
+        .{self._css_class} entry.note-title text {{
+            background-color: {hex_color};
+            color: #2b2b2b;
+            font-weight: bold;
+            font-size: 1.1em;
+            {font_rule}
+        }}
+        .{self._css_class} entry.note-title {{
+            box-shadow: none;
+            border: none;
+            padding-left: 2px;
+            padding-right: 2px;
+        }}
         """
         self._css_provider.load_from_data(css.encode())
         display = Gdk.Display.get_default()
         Gtk.StyleContext.add_provider_for_display(
             display, self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
+    def _on_title_changed(self, entry):
+        self.note["title"] = entry.get_text()
+        self._queue_autosave()
 
     def _queue_autosave(self, *_args):
         if self._autosave_source_id is not None:

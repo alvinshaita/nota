@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     "font_size": 0,  # 0 = don't override, use the app's default
     "default_note_width": 260,
     "default_note_height": 260,
+    "auto_bullet_lists": True,
 }
 
 
