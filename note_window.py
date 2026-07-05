@@ -479,9 +479,12 @@ class NoteWindow(Adw.Window):
         if not line_text.startswith(BULLET):
             return False
         if line_text[len(BULLET):].strip() == "":
-            # Empty bullet -- exit the list instead of continuing it.
+            # Empty bullet -- exit the list by stripping the bullet marker,
+            # staying on this same line rather than also advancing to a new
+            # one (returning True suppresses the default Enter handling,
+            # which would otherwise insert a redundant blank line here).
             buf.delete(line_start, cursor)
-            return False
+            return True
         buf.insert(cursor, "\n" + BULLET)
         return True
 
