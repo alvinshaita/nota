@@ -46,7 +46,7 @@ command -v gtk-update-icon-cache >/dev/null 2>&1 && \
 # nota.desktop instead of just the installed copy)
 mkdir -p "$APPS_DIR"
 rm -f "$APPS_DIR/nota.desktop"
-sed "s|^Exec=.*|Exec=python3 $REPO_DIR/main.py|" "$REPO_DIR/nota.desktop" \
+sed "s|^Exec=.*|Exec=python3 $REPO_DIR/main.py|" "$REPO_DIR/nota.desktop.example" \
     > "$APPS_DIR/nota.desktop"
 
 echo "Done. Nota should now appear in your application menu with its own icon."
