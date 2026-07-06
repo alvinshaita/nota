@@ -1,6 +1,7 @@
 """The Nota application: owns all open note windows and the tray IPC service."""
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import gi
@@ -19,6 +20,7 @@ from note_window import NoteWindow
 from settings_window import SettingsWindow
 
 STACKING_SAVE_DELAY_MS = 800
+TRASH_PURGE_CHECK_INTERVAL_SECONDS = 3600
 
 APP_ID = dbus_common.BUS_NAME
 
@@ -53,15 +55,21 @@ class NotaApplication(Adw.Application):
         fonts_util.ensure_installed()
         self._launch_tray()
         x11_utils.watch_stacking_order(self._on_stacking_changed)
+        GLib.timeout_add_seconds(TRASH_PURGE_CHECK_INTERVAL_SECONDS, self._periodic_purge)
 
     def do_activate(self):
         if not self.windows:
             self.notes = storage.load_notes()
             if not self.notes:
                 self.notes = [storage.new_note(text="Welcome to Nota! Type here.")]
+            purged = storage.purge_expired(self.notes)
+            if len(purged) != len(self.notes):
+                self.notes = purged
+                self.save_all()
+            active = storage.active_notes(self.notes)
             saved = settings_module.load_settings().get("open_note_ids")
-            target = set(saved) if saved is not None else {n["id"] for n in self.notes}
-            for note in self.notes:
+            target = set(saved) if saved is not None else {n["id"] for n in active}
+            for note in active:
                 self._open_window(note, visible=note["id"] in target)
 
     def do_dbus_register(self, connection, object_path):
@@ -211,7 +219,16 @@ class NotaApplication(Adw.Application):
         self._apply_visible_set(current)
 
     def get_all_groups(self):
-        return sorted({n["group"] for n in self.notes if n.get("group")})
+        return sorted({n["group"] for n in storage.active_notes(self.notes) if n.get("group")})
+
+    def _periodic_purge(self):
+        purged = storage.purge_expired(self.notes)
+        if len(purged) != len(self.notes):
+            self.notes = purged
+            self.save_all()
+            if self.note_manager_window is not None:
+                self.note_manager_window._refresh()
+        return GLib.SOURCE_CONTINUE
 
     def apply_font_setting(self):
         key = settings_module.load_settings().get("font_family", "system")
@@ -323,10 +340,31 @@ class NotaApplication(Adw.Application):
             window.present_at_position()
 
     def delete_note(self, note_id):
-        self.notes = [n for n in self.notes if n["id"] != note_id]
         self.windows.pop(note_id, None)
+        for note in self.notes:
+            if note["id"] == note_id:
+                note["deleted_at"] = time.time()
+                break
         self.sync_open_ids()
         self.save_all()
+        if self.note_manager_window is not None:
+            self.note_manager_window._refresh()
+
+    def restore_note(self, note_id):
+        note = next((n for n in self.notes if n["id"] == note_id), None)
+        if note is None:
+            return
+        note.pop("deleted_at", None)
+        self._open_window(note, visible=False)
+        self.save_all()
+        if self.note_manager_window is not None:
+            self.note_manager_window._refresh()
+
+    def permanently_delete_note(self, note_id):
+        self.notes = [n for n in self.notes if n["id"] != note_id]
+        self.save_all()
+        if self.note_manager_window is not None:
+            self.note_manager_window._refresh()
 
     def save_all(self):
         storage.save_notes(self.notes)

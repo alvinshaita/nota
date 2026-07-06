@@ -60,7 +60,7 @@ def _add_note_items(menu, notes, proxy, open_ids):
 
 
 def on_popup_menu(icon, button, activate_time, proxy):
-    notes = storage.load_notes()
+    notes = storage.active_notes(storage.load_notes())
     groups, ungrouped = storage.groups_and_notes(notes)
     saved_open_ids = settings_module.load_settings().get("open_note_ids")
     open_ids = set(saved_open_ids) if saved_open_ids is not None else {n["id"] for n in notes}

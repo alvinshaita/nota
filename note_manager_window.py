@@ -39,15 +39,16 @@ class NoteManagerWindow(Adw.Window):
         self._refresh()
 
     def _ordered_notes(self):
-        """Notes in a stable display order that only shifts when notes are
-        added/removed -- self.app.notes itself gets reshuffled to track
+        """Active notes in a stable display order that only shifts when notes
+        are added/removed -- self.app.notes itself gets reshuffled to track
         window stacking order, which shouldn't affect this list's layout."""
-        notes_by_id = {n["id"]: n for n in self.app.notes}
+        active = storage.active_notes(self.app.notes)
+        notes_by_id = {n["id"]: n for n in active}
         current_ids = set(notes_by_id)
 
         self._id_order = [i for i in self._id_order if i in current_ids]
         seen = set(self._id_order)
-        for note in self.app.notes:
+        for note in active:
             if note["id"] not in seen:
                 self._id_order.append(note["id"])
                 seen.add(note["id"])
@@ -57,10 +58,16 @@ class NoteManagerWindow(Adw.Window):
     def _refresh(self):
         groups, ungrouped = storage.groups_and_notes(self._ordered_notes())
         open_ids = self.app.get_open_note_ids()
+        trash = sorted(
+            storage.deleted_notes(self.app.notes),
+            key=lambda n: n.get("deleted_at", 0), reverse=True,
+        )
 
         signature = [(name, tuple(n["id"] for n in notes)) for name, notes in groups.items()]
         if ungrouped:
             signature.append((None, tuple(n["id"] for n in ungrouped)))
+        if trash:
+            signature.append(("__trash__", tuple(n["id"] for n in trash)))
 
         titles_by_id = {
             n["id"]: storage.note_title(n)
@@ -99,6 +106,9 @@ class NoteManagerWindow(Adw.Window):
 
         if ungrouped:
             self.box.append(self._build_group_expander(None, ungrouped, open_ids))
+
+        if trash:
+            self.box.append(self._build_trash_expander(trash))
 
         self._structure_signature = signature
         GLib.idle_add(vadj.set_value, scroll_value)
@@ -141,6 +151,69 @@ class NoteManagerWindow(Adw.Window):
 
     def _on_note_toggled(self, _check, note_id):
         self.app.toggle_note(note_id)
+
+    def _build_trash_expander(self, notes):
+        expander = Gtk.Expander()
+        expander.set_expanded(False)
+        label = Gtk.Label()
+        label.set_markup(f"<i>Trash ({len(notes)})</i>")
+        expander.set_label_widget(label)
+
+        inner_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4,
+            margin_start=16, margin_top=4, margin_bottom=4,
+        )
+        for note in notes:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+            title_label = Gtk.Label(label=storage.note_title(note), xalign=0, hexpand=True)
+            row.append(title_label)
+
+            restore_btn = Gtk.Button(icon_name="edit-undo-symbolic")
+            restore_btn.add_css_class("flat")
+            restore_btn.set_tooltip_text("Restore")
+            restore_btn.connect("clicked", self._on_restore_clicked, note["id"])
+            row.append(restore_btn)
+
+            delete_btn = Gtk.Button(icon_name="user-trash-symbolic")
+            delete_btn.add_css_class("flat")
+            delete_btn.set_tooltip_text("Delete forever")
+            delete_btn.connect(
+                "clicked", self._on_delete_forever_clicked, note["id"], storage.note_title(note)
+            )
+            row.append(delete_btn)
+
+            inner_box.append(row)
+        expander.set_child(inner_box)
+        return expander
+
+    def _on_restore_clicked(self, _btn, note_id):
+        self.app.restore_note(note_id)
+
+    def _on_delete_forever_clicked(self, _btn, note_id, title):
+        dialog = Gtk.Dialog(title="Delete forever?", transient_for=self, modal=True)
+        dialog.add_buttons(
+            "Cancel", Gtk.ResponseType.CANCEL,
+            "Delete Forever", Gtk.ResponseType.ACCEPT,
+        )
+        dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT).add_css_class("destructive-action")
+
+        content = dialog.get_content_area()
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+        label = Gtk.Label(label=f"Permanently delete “{title}”? This cannot be undone.")
+        label.set_wrap(True)
+        content.append(label)
+
+        dialog.connect("response", self._on_delete_forever_response, note_id)
+        dialog.present()
+
+    def _on_delete_forever_response(self, dialog, response, note_id):
+        dialog.destroy()
+        if response == Gtk.ResponseType.ACCEPT:
+            self.app.permanently_delete_note(note_id)
 
     def _on_group_name_editing_changed(self, label, _pspec, old_name):
         if label.get_editing():

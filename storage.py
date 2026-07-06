@@ -1,5 +1,6 @@
 """Persistence for notes: one JSON file listing all notes and their state."""
 import json
+import time
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,8 @@ DATA_DIR = Path.home() / ".local" / "share" / "nota"
 DATA_FILE = DATA_DIR / "notes.json"
 
 DEFAULT_COLOR = "#f9e08a"
+
+TRASH_RETENTION_DAYS = 7
 
 
 def _ensure_dir():
@@ -55,6 +58,21 @@ def note_title(note):
     if not first_line:
         return "Untitled note"
     return first_line[:40]
+
+
+def active_notes(notes):
+    return [n for n in notes if not n.get("deleted_at")]
+
+
+def deleted_notes(notes):
+    return [n for n in notes if n.get("deleted_at")]
+
+
+def purge_expired(notes, days=TRASH_RETENTION_DAYS):
+    """Drops notes soft-deleted more than `days` ago. Returns a new list --
+    doesn't mutate the input."""
+    cutoff = time.time() - days * 24 * 3600
+    return [n for n in notes if not n.get("deleted_at") or n["deleted_at"] >= cutoff]
 
 
 def groups_and_notes(notes):
