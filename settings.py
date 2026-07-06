@@ -31,6 +31,8 @@ DEFAULT_SETTINGS = {
     "default_note_width": 260,
     "default_note_height": 260,
     "auto_bullet_lists": True,
+    "recoverable_notes": True,
+    "trash_retention_days": 7,
 }
 
 

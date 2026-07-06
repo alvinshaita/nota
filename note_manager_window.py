@@ -184,11 +184,46 @@ class NoteManagerWindow(Adw.Window):
             row.append(delete_btn)
 
             inner_box.append(row)
+
+        clear_btn = Gtk.Button(label="Clear Trash")
+        clear_btn.add_css_class("destructive-action")
+        clear_btn.set_margin_top(6)
+        clear_btn.connect("clicked", self._on_clear_trash_clicked, len(notes))
+        inner_box.append(clear_btn)
+
         expander.set_child(inner_box)
         return expander
 
     def _on_restore_clicked(self, _btn, note_id):
         self.app.restore_note(note_id)
+
+    def _on_clear_trash_clicked(self, _btn, count):
+        dialog = Gtk.Dialog(title="Clear trash?", transient_for=self, modal=True)
+        dialog.add_buttons(
+            "Cancel", Gtk.ResponseType.CANCEL,
+            "Clear Trash", Gtk.ResponseType.ACCEPT,
+        )
+        dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT).add_css_class("destructive-action")
+
+        content = dialog.get_content_area()
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+        note_word = "note" if count == 1 else "notes"
+        label = Gtk.Label(
+            label=f"Permanently delete all {count} {note_word} in Trash? This cannot be undone."
+        )
+        label.set_wrap(True)
+        content.append(label)
+
+        dialog.connect("response", self._on_clear_trash_response)
+        dialog.present()
+
+    def _on_clear_trash_response(self, dialog, response):
+        dialog.destroy()
+        if response == Gtk.ResponseType.ACCEPT:
+            self.app.clear_trash()
 
     def _on_delete_forever_clicked(self, _btn, note_id, title):
         dialog = Gtk.Dialog(title="Delete forever?", transient_for=self, modal=True)

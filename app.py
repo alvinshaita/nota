@@ -62,7 +62,10 @@ class NotaApplication(Adw.Application):
             self.notes = storage.load_notes()
             if not self.notes:
                 self.notes = [storage.new_note(text="Welcome to Nota! Type here.")]
-            purged = storage.purge_expired(self.notes)
+            retention_days = settings_module.load_settings().get(
+                "trash_retention_days", storage.TRASH_RETENTION_DAYS
+            )
+            purged = storage.purge_expired(self.notes, days=retention_days)
             if len(purged) != len(self.notes):
                 self.notes = purged
                 self.save_all()
@@ -222,7 +225,10 @@ class NotaApplication(Adw.Application):
         return sorted({n["group"] for n in storage.active_notes(self.notes) if n.get("group")})
 
     def _periodic_purge(self):
-        purged = storage.purge_expired(self.notes)
+        retention_days = settings_module.load_settings().get(
+            "trash_retention_days", storage.TRASH_RETENTION_DAYS
+        )
+        purged = storage.purge_expired(self.notes, days=retention_days)
         if len(purged) != len(self.notes):
             self.notes = purged
             self.save_all()
@@ -341,10 +347,13 @@ class NotaApplication(Adw.Application):
 
     def delete_note(self, note_id):
         self.windows.pop(note_id, None)
-        for note in self.notes:
-            if note["id"] == note_id:
-                note["deleted_at"] = time.time()
-                break
+        if settings_module.load_settings().get("recoverable_notes", True):
+            for note in self.notes:
+                if note["id"] == note_id:
+                    note["deleted_at"] = time.time()
+                    break
+        else:
+            self.notes = [n for n in self.notes if n["id"] != note_id]
         self.sync_open_ids()
         self.save_all()
         if self.note_manager_window is not None:
@@ -362,6 +371,12 @@ class NotaApplication(Adw.Application):
 
     def permanently_delete_note(self, note_id):
         self.notes = [n for n in self.notes if n["id"] != note_id]
+        self.save_all()
+        if self.note_manager_window is not None:
+            self.note_manager_window._refresh()
+
+    def clear_trash(self):
+        self.notes = storage.active_notes(self.notes)
         self.save_all()
         if self.note_manager_window is not None:
             self.note_manager_window._refresh()

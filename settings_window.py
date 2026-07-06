@@ -124,6 +124,20 @@ class SettingsWindow(Adw.Window):
             "auto_bullet_lists", self.app.apply_auto_bullet_setting,
         )
 
+        trash_group = Adw.PreferencesGroup(title="Trash")
+        layout_page.append(trash_group)
+
+        self._add_switch_row(
+            trash_group, "Move deleted notes to Trash (recoverable)",
+            settings_now.get("recoverable_notes", True),
+            "recoverable_notes", None,
+        )
+        self._add_spin_row(
+            trash_group, "Auto-purge trash after (days)",
+            settings_now.get("trash_retention_days", 7),
+            1, 90, 1, 0, "trash_retention_days", None,
+        )
+
     def _add_page(self, name, title):
         box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=18,
