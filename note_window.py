@@ -571,5 +571,37 @@ class NoteWindow(Adw.Window):
         return True
 
     def _on_delete_clicked(self, *_args):
+        title = self.note.get("title", "").strip()
+        buf = self.text_view.get_buffer()
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
+        if not title and not text:
+            self._delete_note()
+            return
+
+        dialog = Gtk.Dialog(title="Delete note?", transient_for=self, modal=True)
+        dialog.add_buttons(
+            "Cancel", Gtk.ResponseType.CANCEL,
+            "Delete", Gtk.ResponseType.ACCEPT,
+        )
+        dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT).add_css_class("destructive-action")
+
+        content = dialog.get_content_area()
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+        label = Gtk.Label(label="This note has content and can't be recovered once deleted.")
+        label.set_wrap(True)
+        content.append(label)
+
+        dialog.connect("response", self._on_delete_confirm_response)
+        dialog.present()
+
+    def _on_delete_confirm_response(self, dialog, response):
+        dialog.destroy()
+        if response == Gtk.ResponseType.ACCEPT:
+            self._delete_note()
+
+    def _delete_note(self):
         self._on_delete(self.note["id"])
         self.destroy()
