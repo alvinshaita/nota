@@ -24,7 +24,7 @@ import dbus_common
 import settings as settings_module
 import storage
 
-ICON_NAME = "notes-app"
+ICON_NAME = "nota"
 
 
 def get_proxy():
