@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Nota
+Comment=Simple sticky notes for the desktop
+# This is a placeholder, fill it with the real full path to the main.py file
+Exec=python3 ////full////path////to////nota/main.py
+# Use `notes-app` to use the systems icons
+Icon=nota
+Terminal=false
+Categories=Utility;
+StartupWMClass=com.github.nota
