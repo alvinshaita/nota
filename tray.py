@@ -67,6 +67,12 @@ def on_popup_menu(icon, button, activate_time, proxy):
 
     menu = Gtk.Menu()
 
+    new_item = Gtk.MenuItem(label="New Note")
+    new_item.connect("activate", lambda *_: call(proxy, "NewNote"))
+    menu.append(new_item)
+
+    menu.append(Gtk.SeparatorMenuItem())
+
     all_item = Gtk.MenuItem(label="All Notes")
     all_item.connect("activate", lambda *_: call(proxy, "OpenAllNotes"))
     menu.append(all_item)
@@ -110,10 +116,6 @@ def on_popup_menu(icon, button, activate_time, proxy):
         menu.append(ungrouped_item)
 
     menu.append(Gtk.SeparatorMenuItem())
-
-    new_item = Gtk.MenuItem(label="New Note")
-    new_item.connect("activate", lambda *_: call(proxy, "NewNote"))
-    menu.append(new_item)
 
     manage_item = Gtk.MenuItem(label="Manage Notes…")
     manage_item.connect("activate", lambda *_: call(proxy, "ShowNoteManager"))

@@ -59,8 +59,10 @@ class NotaApplication(Adw.Application):
             self.notes = storage.load_notes()
             if not self.notes:
                 self.notes = [storage.new_note(text="Welcome to Nota! Type here.")]
+            saved = settings_module.load_settings().get("open_note_ids")
+            target = set(saved) if saved is not None else {n["id"] for n in self.notes}
             for note in self.notes:
-                self._open_window(note)
+                self._open_window(note, visible=note["id"] in target)
 
     def do_dbus_register(self, connection, object_path):
         if not Adw.Application.do_dbus_register(self, connection, object_path):
@@ -314,10 +316,11 @@ class NotaApplication(Adw.Application):
         offset = self._cascade_index * NEW_NOTE_CASCADE_STEP
         return NEW_NOTE_BASE_X + offset, NEW_NOTE_BASE_Y + offset
 
-    def _open_window(self, note):
+    def _open_window(self, note, visible=True):
         window = NoteWindow(self, note, on_delete=self.delete_note)
         self.windows[note["id"]] = window
-        window.present_at_position()
+        if visible:
+            window.present_at_position()
 
     def delete_note(self, note_id):
         self.notes = [n for n in self.notes if n["id"] != note_id]

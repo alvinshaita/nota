@@ -107,7 +107,20 @@ class NoteManagerWindow(Adw.Window):
         expander = Gtk.Expander()
         expander.set_expanded(True)
         if group_name:
-            expander.set_label(group_name)
+            header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+            name_label = Gtk.EditableLabel(text=group_name)
+            name_label.set_hexpand(True)
+            name_label.connect("notify::editing", self._on_group_name_editing_changed, group_name)
+            header_box.append(name_label)
+
+            rename_btn = Gtk.Button(icon_name="document-edit-symbolic")
+            rename_btn.add_css_class("flat")
+            rename_btn.set_tooltip_text("Rename group")
+            rename_btn.connect("clicked", lambda _b, l=name_label: l.start_editing())
+            header_box.append(rename_btn)
+
+            expander.set_label_widget(header_box)
         else:
             label = Gtk.Label()
             label.set_markup("<i>Ungrouped</i>")
@@ -128,3 +141,24 @@ class NoteManagerWindow(Adw.Window):
 
     def _on_note_toggled(self, _check, note_id):
         self.app.toggle_note(note_id)
+
+    def _on_group_name_editing_changed(self, label, _pspec, old_name):
+        if label.get_editing():
+            return
+        # Defer past this notify handler -- rebuilding the expander tree
+        # (which destroys this same label) from inside its own signal
+        # emission is asking for trouble.
+        GLib.idle_add(self._rename_group, old_name, label.get_text())
+
+    def _rename_group(self, old_name, new_name):
+        new_name = new_name.strip()
+        if new_name and new_name != old_name:
+            changed = False
+            for note in self.app.notes:
+                if note.get("group") == old_name:
+                    note["group"] = new_name
+                    changed = True
+            if changed:
+                self.app.save_all()
+                self._refresh()
+        return GLib.SOURCE_REMOVE

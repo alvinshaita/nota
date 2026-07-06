@@ -13,17 +13,37 @@ LEFT_CLICK_LABELS = {
 }
 
 
-class SettingsWindow(Adw.PreferencesWindow):
+class SettingsWindow(Adw.Window):
     def __init__(self, app):
         super().__init__(application=app, title="Nota Settings")
         self.app = app
-        self.set_default_size(600, 380)
+        self.set_default_size(420, 500)
 
-        tray_page = Adw.PreferencesPage(title="Tray", icon_name="view-pin-symbolic")
-        self.add(tray_page)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_content(root)
 
+        header = Gtk.HeaderBar()
+        header.set_title_widget(Gtk.Label(label="Nota Settings"))
+        root.append(header)
+
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_vexpand(True)
+
+        switcher = Gtk.StackSwitcher()
+        switcher.set_stack(self.stack)
+        switcher.set_halign(Gtk.Align.CENTER)
+        switcher.set_margin_top(10)
+        switcher.set_margin_bottom(6)
+        root.append(switcher)
+
+        root.append(self.stack)
+
+        settings_now = settings_module.load_settings()
+
+        tray_page = self._add_page("tray", "Tray")
         tray_group = Adw.PreferencesGroup(title="Tray Icon")
-        tray_page.add(tray_group)
+        tray_page.append(tray_group)
 
         combo = Adw.ComboRow(title="Left-click action")
         model = Gtk.StringList()
@@ -32,16 +52,15 @@ class SettingsWindow(Adw.PreferencesWindow):
             model.append(LEFT_CLICK_LABELS[action])
         combo.set_model(model)
 
-        current = settings_module.load_settings().get("left_click_action", "toggle")
+        current = settings_now.get("left_click_action", "toggle")
         combo.set_selected(actions.index(current) if current in actions else 0)
         combo.connect("notify::selected", self._on_left_click_changed, actions)
         tray_group.add(combo)
 
-        appearance_page = Adw.PreferencesPage(title="Appearance", icon_name="applications-graphics-symbolic")
-        self.add(appearance_page)
+        appearance_page = self._add_page("appearance", "Appearance")
 
         appearance_group = Adw.PreferencesGroup(title="Appearance")
-        appearance_page.add(appearance_group)
+        appearance_page.append(appearance_group)
 
         font_combo = Adw.ComboRow(title="Note font")
         font_model = Gtk.StringList()
@@ -50,7 +69,6 @@ class SettingsWindow(Adw.PreferencesWindow):
             font_model.append(settings_module.FONT_LABELS[key])
         font_combo.set_model(font_model)
 
-        settings_now = settings_module.load_settings()
         current_font = settings_now.get("font_family", "system")
         font_combo.set_selected(fonts.index(current_font) if current_font in fonts else 0)
         font_combo.connect("notify::selected", self._on_font_changed, fonts)
@@ -63,7 +81,7 @@ class SettingsWindow(Adw.PreferencesWindow):
         )
 
         new_note_group = Adw.PreferencesGroup(title="New Notes")
-        appearance_page.add(new_note_group)
+        appearance_page.append(new_note_group)
 
         self._add_spin_row(
             new_note_group, "Default width",
@@ -76,11 +94,10 @@ class SettingsWindow(Adw.PreferencesWindow):
             100, 1000, 10, 0, "default_note_height", None,
         )
 
-        layout_page = Adw.PreferencesPage(title="Text Layout", icon_name="format-justify-fill-symbolic")
-        self.add(layout_page)
+        layout_page = self._add_page("layout", "Text Layout")
 
         layout_group = Adw.PreferencesGroup(title="Text Layout")
-        layout_page.add(layout_group)
+        layout_page.append(layout_group)
 
         self._add_spin_row(
             layout_group, "Pixels above lines",
@@ -99,13 +116,23 @@ class SettingsWindow(Adw.PreferencesWindow):
         )
 
         editing_group = Adw.PreferencesGroup(title="Editing")
-        layout_page.add(editing_group)
+        layout_page.append(editing_group)
 
         self._add_switch_row(
             editing_group, "Auto-convert \"- \" to bullet lists",
             settings_now.get("auto_bullet_lists", True),
             "auto_bullet_lists", self.app.apply_auto_bullet_setting,
         )
+
+    def _add_page(self, name, title):
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=18,
+            margin_top=18, margin_bottom=18, margin_start=18, margin_end=18,
+        )
+        scroller = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+        scroller.set_child(box)
+        self.stack.add_titled(scroller, name, title)
+        return box
 
     def _add_switch_row(self, group, title, value, key, apply_callback):
         row = Adw.ActionRow(title=title)
