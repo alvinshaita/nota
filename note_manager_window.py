@@ -123,7 +123,7 @@ class NoteManagerWindow(Adw.Window):
             expander.set_label_widget(header_box)
         else:
             label = Gtk.Label()
-            label.set_markup("<i>Ungrouped</i>")
+            label.set_markup("<i>ungrouped</i>")
             expander.set_label_widget(label)
 
         inner_box = Gtk.Box(

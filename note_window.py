@@ -151,6 +151,7 @@ class NoteWindow(Adw.Window):
         self.title_entry.set_margin_end(10)
         self.title_entry.set_margin_bottom(2)
         self.title_entry.connect("changed", self._on_title_changed)
+        self.title_entry.connect("activate", self._on_title_activate)
         root.append(self.title_entry)
 
         toolbar = Gtk.Box(
@@ -529,6 +530,14 @@ class NoteWindow(Adw.Window):
     def _on_title_changed(self, entry):
         self.note["title"] = entry.get_text()
         self._queue_autosave()
+
+    def _on_title_activate(self, _entry):
+        if self._autosave_source_id is not None:
+            GLib.source_remove(self._autosave_source_id)
+            self._autosave_source_id = None
+        self.sync_state()
+        self.app.save_all()
+        self.text_view.grab_focus()
 
     def _queue_autosave(self, *_args):
         if self._autosave_source_id is not None:

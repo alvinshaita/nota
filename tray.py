@@ -88,13 +88,13 @@ def on_popup_menu(icon, button, activate_time, proxy):
         group_item = Gtk.MenuItem(label=group_name)
         submenu = Gtk.Menu()
 
-        open_add_item = Gtk.MenuItem(label=f"Open all in “{group_name}”")
-        open_add_item.connect("activate", lambda _w, g=group_name: call(proxy, "OpenGroup", g))
-        submenu.append(open_add_item)
-
         open_only_item = Gtk.MenuItem(label=f"Open only “{group_name}”")
         open_only_item.connect("activate", lambda _w, g=group_name: call(proxy, "OpenGroupOnly", g))
         submenu.append(open_only_item)
+
+        open_add_item = Gtk.MenuItem(label=f"Open all in “{group_name}”")
+        open_add_item.connect("activate", lambda _w, g=group_name: call(proxy, "OpenGroup", g))
+        submenu.append(open_add_item)
 
         submenu.append(Gtk.SeparatorMenuItem())
         _add_note_items(submenu, group_notes, proxy, open_ids)
@@ -105,8 +105,8 @@ def on_popup_menu(icon, button, activate_time, proxy):
 
     if ungrouped:
         ungrouped_item = Gtk.MenuItem()
-        ungrouped_label = Gtk.Label(label="Ungrouped")
-        ungrouped_label.set_markup("<i>Ungrouped</i>")
+        ungrouped_label = Gtk.Label(label="ungrouped")
+        ungrouped_label.set_markup("<i>ungrouped</i>")
         ungrouped_label.set_xalign(0)
         ungrouped_item.add(ungrouped_label)
         ungrouped_submenu = Gtk.Menu()
