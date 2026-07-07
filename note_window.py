@@ -81,7 +81,8 @@ class FormattedTextView(Gtk.TextView):
         rect.init(x, y + height * 0.4, max(width, 1), thickness)
         snapshot.append_color(UNDERLINE_COLOR, rect)
 
-BULLET = "• "
+BULLET_GLYPHS = ["•", "◦", "▪"]
+BULLET_INDENT_UNIT = "    "
 
 PALETTE = [
     "#f9e08a",  # yellow
@@ -229,7 +230,10 @@ class NoteWindow(Adw.Window):
             current_settings.get("line_height", 1.0),
         )
         self.apply_font_size(current_settings.get("font_size", 0))
-        self._setup_auto_bullet_lists(current_settings.get("auto_bullet_lists", True))
+        self._setup_auto_bullet_lists(
+            current_settings.get("auto_bullet_lists", True),
+            current_settings.get("vary_bullet_symbols", True),
+        )
 
         self.connect("close-request", self._on_close_request)
         self.connect("notify::default-width", self._queue_autosave)
@@ -446,8 +450,9 @@ class NoteWindow(Adw.Window):
         self._font_size = size
         self._refresh_css()
 
-    def _setup_auto_bullet_lists(self, enabled):
+    def _setup_auto_bullet_lists(self, enabled, vary_symbols):
         self._auto_bullet_lists = enabled
+        self._vary_bullet_symbols = vary_symbols
         self.text_view.get_buffer().connect_after("insert-text", self._maybe_convert_to_bullet)
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect("key-pressed", self._on_text_key_pressed)
@@ -457,37 +462,110 @@ class NoteWindow(Adw.Window):
     def apply_auto_bullet_lists(self, enabled):
         self._auto_bullet_lists = enabled
 
+    def apply_vary_bullet_symbols(self, enabled):
+        self._vary_bullet_symbols = enabled
+
+    def _bullet_glyph_for_depth(self, depth):
+        if self._vary_bullet_symbols:
+            return BULLET_GLYPHS[depth % len(BULLET_GLYPHS)]
+        return BULLET_GLYPHS[0]
+
+    def _parse_bullet_line(self, line_text):
+        """If line_text starts with a bullet marker (any known glyph + a
+        space, indented in whole multiples of BULLET_INDENT_UNIT), returns
+        (depth, prefix_len). Otherwise returns None."""
+        stripped = line_text.lstrip(" ")
+        indent_len = len(line_text) - len(stripped)
+        if indent_len % len(BULLET_INDENT_UNIT) != 0:
+            return None
+        depth = indent_len // len(BULLET_INDENT_UNIT)
+        for glyph in BULLET_GLYPHS:
+            marker = glyph + " "
+            if stripped.startswith(marker):
+                return depth, indent_len + len(marker)
+        return None
+
     def _maybe_convert_to_bullet(self, buf, location, text, _length):
         if not self._auto_bullet_lists or text != " ":
             return
         line_start = location.copy()
         line_start.set_line_offset(0)
         prefix = buf.get_text(line_start, location, False)
-        if prefix == "- ":
-            buf.delete(line_start, location)
-            buf.insert(line_start, BULLET)
+        stripped = prefix.lstrip(" ")
+        indent_len = len(prefix) - len(stripped)
+        if stripped == "- " and indent_len % len(BULLET_INDENT_UNIT) == 0:
+            depth = indent_len // len(BULLET_INDENT_UNIT)
+            glyph = self._bullet_glyph_for_depth(depth)
+            start = line_start.copy()
+            start.forward_chars(indent_len)
+            buf.delete(start, location)
+            buf.insert(start, glyph + " ")
 
-    def _on_text_key_pressed(self, _controller, keyval, _keycode, _state):
+    def _on_text_key_pressed(self, _controller, keyval, _keycode, state):
         if not self._auto_bullet_lists:
-            return False
-        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             return False
         buf = self.text_view.get_buffer()
         cursor = buf.get_iter_at_mark(buf.get_insert())
         line_start = cursor.copy()
         line_start.set_line_offset(0)
         line_text = buf.get_text(line_start, cursor, False)
-        if not line_text.startswith(BULLET):
-            return False
-        if line_text[len(BULLET):].strip() == "":
-            # Empty bullet -- exit the list by stripping the bullet marker,
-            # staying on this same line rather than also advancing to a new
-            # one (returning True suppresses the default Enter handling,
-            # which would otherwise insert a redundant blank line here).
-            buf.delete(line_start, cursor)
+        parsed = self._parse_bullet_line(line_text)
+
+        if keyval in (Gdk.KEY_Tab, Gdk.KEY_KP_Tab, Gdk.KEY_ISO_Left_Tab):
+            if parsed is None:
+                return False
+            depth, prefix_len = parsed
+            outdent = keyval == Gdk.KEY_ISO_Left_Tab or bool(state & Gdk.ModifierType.SHIFT_MASK)
+            if outdent:
+                if depth == 0:
+                    return True
+                new_depth = depth - 1
+            else:
+                new_depth = depth + 1
+            new_glyph = self._bullet_glyph_for_depth(new_depth)
+            prefix_start = line_start.copy()
+            prefix_end = line_start.copy()
+            prefix_end.forward_chars(prefix_len)
+            buf.delete(prefix_start, prefix_end)
+            buf.insert(prefix_start, BULLET_INDENT_UNIT * new_depth + new_glyph + " ")
             return True
-        buf.insert(cursor, "\n" + BULLET)
-        return True
+
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if parsed is None:
+                return False
+            depth, prefix_len = parsed
+            if line_text[prefix_len:].strip() == "":
+                # Empty bullet -- exit the list by stripping the bullet
+                # marker, staying on this same line (regardless of nesting
+                # depth) rather than also advancing to a new one (returning
+                # True suppresses the default Enter handling, which would
+                # otherwise insert a redundant blank line here).
+                buf.delete(line_start, cursor)
+                return True
+            glyph = self._bullet_glyph_for_depth(depth)
+            buf.insert(cursor, "\n" + BULLET_INDENT_UNIT * depth + glyph + " ")
+            return True
+
+        if keyval == Gdk.KEY_BackSpace:
+            if parsed is None:
+                return False
+            depth, prefix_len = parsed
+            if len(line_text) != prefix_len:
+                # Cursor isn't right at the start of the bullet's content --
+                # let backspace behave normally (delete the previous char).
+                return False
+            prefix_start = line_start.copy()
+            if depth == 0:
+                # Top-level bullet -- strip the marker, leaving plain text.
+                buf.delete(prefix_start, cursor)
+                return True
+            new_depth = depth - 1
+            new_glyph = self._bullet_glyph_for_depth(new_depth)
+            buf.delete(prefix_start, cursor)
+            buf.insert(prefix_start, BULLET_INDENT_UNIT * new_depth + new_glyph + " ")
+            return True
+
+        return False
 
     def _refresh_css(self):
         hex_color = self.note.get("color", storage.DEFAULT_COLOR)

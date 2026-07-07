@@ -260,6 +260,11 @@ class NotaApplication(Adw.Application):
         for window in self.windows.values():
             window.apply_auto_bullet_lists(enabled)
 
+    def apply_vary_bullet_symbols_setting(self):
+        enabled = settings_module.load_settings().get("vary_bullet_symbols", True)
+        for window in self.windows.values():
+            window.apply_vary_bullet_symbols(enabled)
+
     def _on_stacking_changed(self):
         xid_to_id = {}
         for note_id, window in self.windows.items():

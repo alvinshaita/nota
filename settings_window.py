@@ -123,6 +123,11 @@ class SettingsWindow(Adw.Window):
             settings_now.get("auto_bullet_lists", True),
             "auto_bullet_lists", self.app.apply_auto_bullet_setting,
         )
+        self._add_switch_row(
+            editing_group, "Use different bullet symbols per nesting level",
+            settings_now.get("vary_bullet_symbols", True),
+            "vary_bullet_symbols", self.app.apply_vary_bullet_symbols_setting,
+        )
 
         trash_group = Adw.PreferencesGroup(title="Trash")
         layout_page.append(trash_group)
