@@ -57,6 +57,15 @@ class SettingsWindow(Adw.Window):
         combo.connect("notify::selected", self._on_left_click_changed, actions)
         tray_group.add(combo)
 
+        startup_group = Adw.PreferencesGroup(title="Startup")
+        tray_page.append(startup_group)
+
+        self._add_switch_row(
+            startup_group, "Start Nota automatically on login",
+            settings_now.get("autostart", True),
+            "autostart", self.app.apply_autostart_setting,
+        )
+
         appearance_page = self._add_page("appearance", "Appearance")
 
         appearance_group = Adw.PreferencesGroup(title="Appearance")

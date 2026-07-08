@@ -34,6 +34,7 @@ DEFAULT_SETTINGS = {
     "vary_bullet_symbols": False,
     "recoverable_notes": True,
     "trash_retention_days": 7,
+    "autostart": True,
 }
 
 

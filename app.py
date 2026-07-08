@@ -10,6 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib
 
+import autostart
 import dbus_common
 import fonts_util
 import settings as settings_module
@@ -31,8 +32,9 @@ NEW_NOTE_CASCADE_STEPS = 10
 
 
 class NotaApplication(Adw.Application):
-    def __init__(self):
+    def __init__(self, launched_via_autostart=False):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self._launched_via_autostart = launched_via_autostart
         self.notes = []
         self.windows = {}
         self.notes_visible = True
@@ -53,6 +55,7 @@ class NotaApplication(Adw.Application):
     def do_startup(self):
         Adw.Application.do_startup(self)
         fonts_util.ensure_installed()
+        autostart.sync(settings_module.load_settings().get("autostart", True))
         self._launch_tray()
         x11_utils.watch_stacking_order(self._on_stacking_changed)
         GLib.timeout_add_seconds(TRASH_PURGE_CHECK_INTERVAL_SECONDS, self._periodic_purge)
@@ -70,8 +73,11 @@ class NotaApplication(Adw.Application):
                 self.notes = purged
                 self.save_all()
             active = storage.active_notes(self.notes)
-            saved = settings_module.load_settings().get("open_note_ids")
-            target = set(saved) if saved is not None else {n["id"] for n in active}
+            if self._launched_via_autostart:
+                target = set()
+            else:
+                saved = settings_module.load_settings().get("open_note_ids")
+                target = set(saved) if saved is not None else {n["id"] for n in active}
             for note in active:
                 self._open_window(note, visible=note["id"] in target)
 
@@ -264,6 +270,9 @@ class NotaApplication(Adw.Application):
         enabled = settings_module.load_settings().get("vary_bullet_symbols", True)
         for window in self.windows.values():
             window.apply_vary_bullet_symbols(enabled)
+
+    def apply_autostart_setting(self):
+        autostart.sync(settings_module.load_settings().get("autostart", True))
 
     def _on_stacking_changed(self):
         xid_to_id = {}
