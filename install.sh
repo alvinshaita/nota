@@ -32,7 +32,8 @@ python3 -c "import Xlib" 2>/dev/null || {
 }
 
 # --- Icon -----------------------------------------------------------------
-for size in 16 24 32 48 256; do
+# for size in 16 24 32 48 256; do
+for size in 256; do
     dest="$ICON_DIR/${size}x${size}/apps"
     mkdir -p "$dest"
     cp "$REPO_DIR/icons/nota-${size}.png" "$dest/nota.png"
