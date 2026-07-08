@@ -82,7 +82,7 @@ class FormattedTextView(Gtk.TextView):
         snapshot.append_color(UNDERLINE_COLOR, rect)
 
 BULLET_GLYPHS = ["•", "◦", "▪"]
-BULLET_INDENT_UNIT = "    "
+BULLET_INDENT_PX_PER_LEVEL = 24
 
 PALETTE = [
     "#f9e08a",  # yellow
@@ -214,13 +214,20 @@ class NoteWindow(Adw.Window):
         self.text_view.get_buffer().connect("changed", self._queue_autosave)
         scroller.set_child(self.text_view)
 
+        current_settings = settings_module.load_settings()
+        # _apply_formatting (called from _setup_formatting below) needs to
+        # restore saved bullet-depth tags, which requires these two -- set
+        # them before _setup_formatting() runs rather than in
+        # _setup_auto_bullet_lists() further down, which is too late.
+        self._auto_bullet_lists = current_settings.get("auto_bullet_lists", True)
+        self._vary_bullet_symbols = current_settings.get("vary_bullet_symbols", True)
+
         self._setup_formatting()
 
         self._font_family = None
         self._line_height = 1.0
         self._font_size = 0
         self._apply_color(self.note.get("color", storage.DEFAULT_COLOR))
-        current_settings = settings_module.load_settings()
         self.apply_font(settings_module.FONT_CHOICES.get(
             current_settings.get("font_family", "system")
         ))
@@ -396,10 +403,21 @@ class NoteWindow(Adw.Window):
                 break
         return True
 
+    def _all_bullet_tag_names(self, buf):
+        names = []
+
+        def _collect(tag, *_args):
+            name = tag.get_property("name") or ""
+            if name.startswith("bullet-depth-"):
+                names.append(name)
+
+        buf.get_tag_table().foreach(_collect)
+        return names
+
     def _serialize_formatting(self):
         buf = self.text_view.get_buffer()
         result = {}
-        for name in FORMAT_TAGS:
+        for name in FORMAT_TAGS + self._all_bullet_tag_names(buf):
             tag = buf.get_tag_table().lookup(name)
             ranges = []
             it = buf.get_start_iter()
@@ -424,7 +442,14 @@ class NoteWindow(Adw.Window):
     def _apply_formatting(self, formatting):
         buf = self.text_view.get_buffer()
         for name, ranges in (formatting or {}).items():
-            tag = buf.get_tag_table().lookup(name)
+            if name.startswith("bullet-depth-"):
+                try:
+                    depth = int(name.rsplit("-", 1)[1])
+                except ValueError:
+                    continue
+                tag = self._bullet_tag_for_depth(depth)
+            else:
+                tag = buf.get_tag_table().lookup(name)
             if tag is None:
                 continue
             for start_off, end_off in ranges:
@@ -453,7 +478,7 @@ class NoteWindow(Adw.Window):
     def _setup_auto_bullet_lists(self, enabled, vary_symbols):
         self._auto_bullet_lists = enabled
         self._vary_bullet_symbols = vary_symbols
-        self.text_view.get_buffer().connect_after("insert-text", self._maybe_convert_to_bullet)
+        self.text_view.get_buffer().connect_after("insert-text", self._on_text_inserted)
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect("key-pressed", self._on_text_key_pressed)
         self.text_view.add_controller(key_controller)
@@ -470,36 +495,109 @@ class NoteWindow(Adw.Window):
             return BULLET_GLYPHS[depth % len(BULLET_GLYPHS)]
         return BULLET_GLYPHS[0]
 
-    def _parse_bullet_line(self, line_text):
-        """If line_text starts with a bullet marker (any known glyph + a
-        space, indented in whole multiples of BULLET_INDENT_UNIT), returns
-        (depth, prefix_len). Otherwise returns None."""
-        stripped = line_text.lstrip(" ")
-        indent_len = len(line_text) - len(stripped)
-        if indent_len % len(BULLET_INDENT_UNIT) != 0:
-            return None
-        depth = indent_len // len(BULLET_INDENT_UNIT)
+    def _measure_text_width_px(self, text):
+        layout = self.text_view.create_pango_layout(text)
+        width, _height = layout.get_pixel_size()
+        return width
+
+    def _bullet_tag_for_depth(self, depth):
+        """Gets (or lazily creates) the shared TextTag that gives a bullet
+        line at this depth its hanging indent: wrapped continuation lines
+        align under the bullet's text rather than restarting at the note's
+        left edge, since plain leading-space characters only affect a
+        paragraph's first visual line, not its wrapped ones."""
+        tag_table = self.text_view.get_buffer().get_tag_table()
+        name = f"bullet-depth-{depth}"
+        tag = tag_table.lookup(name)
+        if tag is None:
+            glyph = self._bullet_glyph_for_depth(depth)
+            # Measure the marker's actual rendered width rather than
+            # guessing a fixed pixel value -- a hardcoded estimate drifts
+            # off by a character or so depending on font/glyph, so wrapped
+            # lines land under the wrong letter of the bullet's own text.
+            hang_px = self._measure_text_width_px(glyph + " ")
+            tag = Gtk.TextTag.new(name)
+            tag.set_property("left-margin", depth * BULLET_INDENT_PX_PER_LEVEL + hang_px)
+            tag.set_property("indent", -hang_px)
+            tag_table.add(tag)
+        return tag
+
+    def _bullet_depth_at_iter(self, it):
+        for tag in it.get_tags():
+            name = tag.get_property("name") or ""
+            if name.startswith("bullet-depth-"):
+                try:
+                    return int(name.rsplit("-", 1)[1])
+                except ValueError:
+                    pass
+        return 0
+
+    def _set_line_bullet_depth(self, buf, line_start, depth):
+        line_end = line_start.copy()
+        line_end.forward_to_line_end()
+        for tag in list(line_start.get_tags()):
+            name = tag.get_property("name") or ""
+            if name.startswith("bullet-depth-"):
+                buf.remove_tag(tag, line_start, line_end)
+        buf.apply_tag(self._bullet_tag_for_depth(depth), line_start, line_end)
+
+    def _clear_line_bullet_tag(self, buf, line_start):
+        line_end = line_start.copy()
+        line_end.forward_to_line_end()
+        for tag in list(line_start.get_tags()):
+            name = tag.get_property("name") or ""
+            if name.startswith("bullet-depth-"):
+                buf.remove_tag(tag, line_start, line_end)
+
+    def _parse_bullet_line(self, line_start, line_text_up_to_cursor):
+        """If the line starts with a bullet marker (any known glyph + a
+        space), returns (depth, prefix_len). Otherwise returns None. Depth
+        comes from the line's hanging-indent tag, not the text itself."""
         for glyph in BULLET_GLYPHS:
             marker = glyph + " "
-            if stripped.startswith(marker):
-                return depth, indent_len + len(marker)
+            if line_text_up_to_cursor.startswith(marker):
+                return self._bullet_depth_at_iter(line_start), len(marker)
         return None
 
-    def _maybe_convert_to_bullet(self, buf, location, text, _length):
-        if not self._auto_bullet_lists or text != " ":
+    def _on_text_inserted(self, buf, location, text, _length):
+        if not self._auto_bullet_lists:
             return
         line_start = location.copy()
         line_start.set_line_offset(0)
-        prefix = buf.get_text(line_start, location, False)
-        stripped = prefix.lstrip(" ")
-        indent_len = len(prefix) - len(stripped)
-        if stripped == "- " and indent_len % len(BULLET_INDENT_UNIT) == 0:
-            depth = indent_len // len(BULLET_INDENT_UNIT)
-            glyph = self._bullet_glyph_for_depth(depth)
-            start = line_start.copy()
-            start.forward_chars(indent_len)
-            buf.delete(start, location)
-            buf.insert(start, glyph + " ")
+
+        if text == " ":
+            prefix = buf.get_text(line_start, location, False)
+            if prefix == "- ":
+                glyph = self._bullet_glyph_for_depth(0)
+                buf.delete(line_start, location)
+                buf.insert(line_start, glyph + " ")
+                # line_start isn't guaranteed revalidated by the delete/
+                # insert above (only iters directly passed to them are) --
+                # refetch a fresh one from the cursor mark before tagging.
+                fresh_start = buf.get_iter_at_mark(buf.get_insert())
+                fresh_start.set_line_offset(0)
+                self._set_line_bullet_depth(buf, fresh_start, 0)
+                return
+
+        # The hanging-indent tag only ever gets applied to exactly the
+        # bullet marker at the moment it's created -- GTK doesn't
+        # automatically extend a custom tag to text typed afterward. So as
+        # more text is typed into an already-bulleted line, keep
+        # re-covering the *whole* current line with the tag; otherwise only
+        # the marker itself stays tagged and the rest of a wrapped line
+        # loses its hanging indent (confirmed via saved formatting ranges
+        # showing only the 2-char marker tagged despite a full sentence
+        # having been typed after it).
+        fresh_start = buf.get_iter_at_mark(buf.get_insert())
+        fresh_start.set_line_offset(0)
+        fresh_end = fresh_start.copy()
+        fresh_end.forward_to_line_end()
+        line_text_now = buf.get_text(fresh_start, fresh_end, False)
+        for glyph in BULLET_GLYPHS:
+            if line_text_now.startswith(glyph + " "):
+                depth = self._bullet_depth_at_iter(fresh_start)
+                self._set_line_bullet_depth(buf, fresh_start, depth)
+                break
 
     def _on_text_key_pressed(self, _controller, keyval, _keycode, state):
         if not self._auto_bullet_lists:
@@ -509,7 +607,7 @@ class NoteWindow(Adw.Window):
         line_start = cursor.copy()
         line_start.set_line_offset(0)
         line_text = buf.get_text(line_start, cursor, False)
-        parsed = self._parse_bullet_line(line_text)
+        parsed = self._parse_bullet_line(line_start, line_text)
 
         if keyval in (Gdk.KEY_Tab, Gdk.KEY_KP_Tab, Gdk.KEY_ISO_Left_Tab):
             if parsed is None:
@@ -527,7 +625,11 @@ class NoteWindow(Adw.Window):
             prefix_end = line_start.copy()
             prefix_end.forward_chars(prefix_len)
             buf.delete(prefix_start, prefix_end)
-            buf.insert(prefix_start, BULLET_INDENT_UNIT * new_depth + new_glyph + " ")
+            buf.insert(prefix_start, new_glyph + " ")
+            fresh_start = buf.get_iter_at_mark(buf.get_insert())
+            fresh_start.set_line_offset(0)
+            self._set_line_bullet_depth(buf, fresh_start, new_depth)
+            self.text_view.scroll_mark_onscreen(buf.get_insert())
             return True
 
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -541,9 +643,15 @@ class NoteWindow(Adw.Window):
                 # True suppresses the default Enter handling, which would
                 # otherwise insert a redundant blank line here).
                 buf.delete(line_start, cursor)
+                self._clear_line_bullet_tag(buf, line_start)
+                self.text_view.scroll_mark_onscreen(buf.get_insert())
                 return True
             glyph = self._bullet_glyph_for_depth(depth)
-            buf.insert(cursor, "\n" + BULLET_INDENT_UNIT * depth + glyph + " ")
+            buf.insert(cursor, "\n" + glyph + " ")
+            new_line_start = buf.get_iter_at_mark(buf.get_insert())
+            new_line_start.set_line_offset(0)
+            self._set_line_bullet_depth(buf, new_line_start, depth)
+            self.text_view.scroll_mark_onscreen(buf.get_insert())
             return True
 
         if keyval == Gdk.KEY_BackSpace:
@@ -558,11 +666,19 @@ class NoteWindow(Adw.Window):
             if depth == 0:
                 # Top-level bullet -- strip the marker, leaving plain text.
                 buf.delete(prefix_start, cursor)
+                fresh_start = buf.get_iter_at_mark(buf.get_insert())
+                fresh_start.set_line_offset(0)
+                self._clear_line_bullet_tag(buf, fresh_start)
+                self.text_view.scroll_mark_onscreen(buf.get_insert())
                 return True
             new_depth = depth - 1
             new_glyph = self._bullet_glyph_for_depth(new_depth)
             buf.delete(prefix_start, cursor)
-            buf.insert(prefix_start, BULLET_INDENT_UNIT * new_depth + new_glyph + " ")
+            buf.insert(prefix_start, new_glyph + " ")
+            fresh_start = buf.get_iter_at_mark(buf.get_insert())
+            fresh_start.set_line_offset(0)
+            self._set_line_bullet_depth(buf, fresh_start, new_depth)
+            self.text_view.scroll_mark_onscreen(buf.get_insert())
             return True
 
         return False
