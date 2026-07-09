@@ -187,12 +187,6 @@ class NoteWindow(Adw.Window):
         group_btn.set_popover(self._group_popover)
         toolbar.append(group_btn)
 
-        export_btn = Gtk.Button(icon_name="document-save-symbolic")
-        export_btn.set_tooltip_text("Export this note")
-        export_btn.add_css_class("flat")
-        export_btn.connect("clicked", self._on_export_clicked)
-        toolbar.append(export_btn)
-
         spacer = Gtk.Box(hexpand=True)
         toolbar.append(spacer)
 
@@ -389,6 +383,17 @@ class NoteWindow(Adw.Window):
         menu_model.append("Italic", "format.italic")
         menu_model.append("Underline", "format.underline")
         menu_model.append("Strikethrough", "format.strikethrough")
+
+        note_action_group = Gio.SimpleActionGroup()
+        export_action = Gio.SimpleAction.new("export", None)
+        export_action.connect("activate", self._on_export_action)
+        note_action_group.add_action(export_action)
+        self.text_view.insert_action_group("note", note_action_group)
+
+        note_section = Gio.Menu()
+        note_section.append("Export Note…", "note.export")
+        menu_model.append_section(None, note_section)
+
         self.text_view.set_extra_menu(menu_model)
 
     def _on_toggle_format(self, _action, _param, tag_name):
@@ -917,7 +922,7 @@ class NoteWindow(Adw.Window):
         if position is not None:
             self.note["x"], self.note["y"] = position
 
-    def _on_export_clicked(self, _btn):
+    def _on_export_action(self, _action, _param):
         self.sync_state()
         safe_title = storage.note_title(self.note).replace("/", "-")
         export_notes_with_picker(self, [self.note], f"{safe_title}.json")
