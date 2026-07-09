@@ -82,7 +82,9 @@ class FormattedTextView(Gtk.TextView):
         snapshot.append_color(UNDERLINE_COLOR, rect)
 
 BULLET_GLYPHS = ["•", "◦", "▪"]
-BULLET_INDENT_PX_PER_LEVEL = 24
+CHECKBOX_UNCHECKED = "☐"
+CHECKBOX_CHECKED = "☑"
+LIST_INDENT_PX_PER_LEVEL = 24
 
 PALETTE = [
     "#f9e08a",  # yellow
@@ -358,6 +360,7 @@ class NoteWindow(Adw.Window):
         buf.create_tag("italic", style=Pango.Style.ITALIC)
         buf.create_tag("underline")
         buf.create_tag("strikethrough", strikethrough=True)
+        buf.create_tag("checkbox-checked", strikethrough=True, foreground="#8a8a8a")
         self._apply_formatting(self.note.get("formatting"))
 
         action_group = Gio.SimpleActionGroup()
@@ -403,12 +406,13 @@ class NoteWindow(Adw.Window):
                 break
         return True
 
-    def _all_bullet_tag_names(self, buf):
+    def _all_dynamic_tag_names(self, buf):
         names = []
 
         def _collect(tag, *_args):
             name = tag.get_property("name") or ""
-            if name.startswith("bullet-depth-"):
+            if (name.startswith("bullet-depth-") or name.startswith("checkbox-depth-")
+                    or name == "checkbox-checked"):
                 names.append(name)
 
         buf.get_tag_table().foreach(_collect)
@@ -417,7 +421,7 @@ class NoteWindow(Adw.Window):
     def _serialize_formatting(self):
         buf = self.text_view.get_buffer()
         result = {}
-        for name in FORMAT_TAGS + self._all_bullet_tag_names(buf):
+        for name in FORMAT_TAGS + self._all_dynamic_tag_names(buf):
             tag = buf.get_tag_table().lookup(name)
             ranges = []
             it = buf.get_start_iter()
@@ -447,7 +451,13 @@ class NoteWindow(Adw.Window):
                     depth = int(name.rsplit("-", 1)[1])
                 except ValueError:
                     continue
-                tag = self._bullet_tag_for_depth(depth)
+                tag = self._list_tag_for_depth("bullet", depth)
+            elif name.startswith("checkbox-depth-"):
+                try:
+                    depth = int(name.rsplit("-", 1)[1])
+                except ValueError:
+                    continue
+                tag = self._list_tag_for_depth("checkbox", depth)
             else:
                 tag = buf.get_tag_table().lookup(name)
             if tag is None:
@@ -484,6 +494,22 @@ class NoteWindow(Adw.Window):
         self.text_view.add_controller(key_controller)
         self._bullet_key_controller = key_controller
 
+        # Capture phase so we can claim the click before GtkTextView's own
+        # handling moves the cursor there -- a click on a checkbox glyph
+        # should toggle it, not place the text cursor.
+        click_controller = Gtk.GestureClick.new()
+        click_controller.set_button(1)
+        click_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        click_controller.connect("pressed", self._on_checkbox_click_pressed)
+        self.text_view.add_controller(click_controller)
+        self._checkbox_click_controller = click_controller
+
+        self._checkbox_cursor_active = False
+        motion_controller = Gtk.EventControllerMotion.new()
+        motion_controller.connect("motion", self._on_checkbox_motion)
+        self.text_view.add_controller(motion_controller)
+        self._checkbox_motion_controller = motion_controller
+
     def apply_auto_bullet_lists(self, enabled):
         self._auto_bullet_lists = enabled
 
@@ -495,68 +521,103 @@ class NoteWindow(Adw.Window):
             return BULLET_GLYPHS[depth % len(BULLET_GLYPHS)]
         return BULLET_GLYPHS[0]
 
+    def _marker_glyph(self, kind, depth, checked=False):
+        if kind == "bullet":
+            return self._bullet_glyph_for_depth(depth)
+        return CHECKBOX_CHECKED if checked else CHECKBOX_UNCHECKED
+
     def _measure_text_width_px(self, text):
         layout = self.text_view.create_pango_layout(text)
         width, _height = layout.get_pixel_size()
         return width
 
-    def _bullet_tag_for_depth(self, depth):
-        """Gets (or lazily creates) the shared TextTag that gives a bullet
-        line at this depth its hanging indent: wrapped continuation lines
-        align under the bullet's text rather than restarting at the note's
-        left edge, since plain leading-space characters only affect a
-        paragraph's first visual line, not its wrapped ones."""
+    def _list_tag_for_depth(self, kind, depth):
+        """Gets (or lazily creates) the shared TextTag that gives a list
+        line (bullet or checkbox) at this depth its hanging indent: wrapped
+        continuation lines align under the marker's text rather than
+        restarting at the note's left edge, since plain leading-space
+        characters only affect a paragraph's first visual line, not its
+        wrapped ones."""
         tag_table = self.text_view.get_buffer().get_tag_table()
-        name = f"bullet-depth-{depth}"
+        name = f"{kind}-depth-{depth}"
         tag = tag_table.lookup(name)
         if tag is None:
-            glyph = self._bullet_glyph_for_depth(depth)
+            # Always measure off the canonical (unchecked) glyph for
+            # checkboxes, so toggling checked/unchecked never shifts the
+            # hanging indent.
+            glyph = CHECKBOX_UNCHECKED if kind == "checkbox" else self._bullet_glyph_for_depth(depth)
             # Measure the marker's actual rendered width rather than
             # guessing a fixed pixel value -- a hardcoded estimate drifts
             # off by a character or so depending on font/glyph, so wrapped
-            # lines land under the wrong letter of the bullet's own text.
+            # lines land under the wrong letter of the marker's own text.
             hang_px = self._measure_text_width_px(glyph + " ")
             tag = Gtk.TextTag.new(name)
-            tag.set_property("left-margin", depth * BULLET_INDENT_PX_PER_LEVEL + hang_px)
+            tag.set_property("left-margin", depth * LIST_INDENT_PX_PER_LEVEL + hang_px)
             tag.set_property("indent", -hang_px)
             tag_table.add(tag)
         return tag
 
-    def _bullet_depth_at_iter(self, it):
+    def _line_kind_and_depth_at_iter(self, it):
         for tag in it.get_tags():
             name = tag.get_property("name") or ""
             if name.startswith("bullet-depth-"):
                 try:
-                    return int(name.rsplit("-", 1)[1])
+                    return "bullet", int(name.rsplit("-", 1)[1])
                 except ValueError:
                     pass
-        return 0
+            if name.startswith("checkbox-depth-"):
+                try:
+                    return "checkbox", int(name.rsplit("-", 1)[1])
+                except ValueError:
+                    pass
+        return None, 0
 
-    def _set_line_bullet_depth(self, buf, line_start, depth):
+    def _remove_list_depth_tags(self, buf, line_start, line_end):
+        """Removes any bullet-depth-*/checkbox-depth-* tag from the given
+        range, looked up via the tag table rather than the tags actually
+        present at line_start -- a freshly-inserted character (e.g. right
+        after replacing a checkbox glyph) never inherits the tags of the
+        text it replaced, so checking line_start.get_tags() can miss the
+        very tag that needs removing and leave two depth tags stacked on
+        the same line (confirmed bug: toggling a nested checkbox reset it
+        to the root level because the old depth tag never got cleared).
+        remove_tag is a no-op for tags not present in the range, so this is
+        safe to call unconditionally."""
+        for name in self._all_dynamic_tag_names(buf):
+            if name.startswith("bullet-depth-") or name.startswith("checkbox-depth-"):
+                tag = buf.get_tag_table().lookup(name)
+                if tag is not None:
+                    buf.remove_tag(tag, line_start, line_end)
+
+    def _set_line_list_depth(self, buf, line_start, kind, depth):
         line_end = line_start.copy()
         line_end.forward_to_line_end()
-        for tag in list(line_start.get_tags()):
-            name = tag.get_property("name") or ""
-            if name.startswith("bullet-depth-"):
-                buf.remove_tag(tag, line_start, line_end)
-        buf.apply_tag(self._bullet_tag_for_depth(depth), line_start, line_end)
+        self._remove_list_depth_tags(buf, line_start, line_end)
+        buf.apply_tag(self._list_tag_for_depth(kind, depth), line_start, line_end)
 
-    def _clear_line_bullet_tag(self, buf, line_start):
+    def _clear_line_list_tag(self, buf, line_start):
         line_end = line_start.copy()
         line_end.forward_to_line_end()
-        for tag in list(line_start.get_tags()):
-            name = tag.get_property("name") or ""
-            if name.startswith("bullet-depth-"):
-                buf.remove_tag(tag, line_start, line_end)
+        self._remove_list_depth_tags(buf, line_start, line_end)
+        checked_tag = buf.get_tag_table().lookup("checkbox-checked")
+        if checked_tag is not None:
+            buf.remove_tag(checked_tag, line_start, line_end)
 
-    def _parse_bullet_line(self, line_start, line_text_up_to_cursor):
-        """If the line starts with a bullet marker (any known glyph + a
-        space), returns (depth, prefix_len). Otherwise returns None. Depth
-        comes from the line's hanging-indent tag, not the text itself."""
+    def _parse_list_line(self, line_start, line_text_up_to_cursor):
+        """If the line starts with a bullet or checkbox marker (a known
+        glyph + a space), returns (kind, depth, prefix_len). Otherwise
+        returns None. Depth comes from the line's hanging-indent tag, not
+        the text itself."""
         for glyph in BULLET_GLYPHS:
             marker = glyph + " "
             if line_text_up_to_cursor.startswith(marker):
-                return self._bullet_depth_at_iter(line_start), len(marker)
+                _, depth = self._line_kind_and_depth_at_iter(line_start)
+                return "bullet", depth, len(marker)
+        for glyph in (CHECKBOX_UNCHECKED, CHECKBOX_CHECKED):
+            marker = glyph + " "
+            if line_text_up_to_cursor.startswith(marker):
+                _, depth = self._line_kind_and_depth_at_iter(line_start)
+                return "checkbox", depth, len(marker)
         return None
 
     def _on_text_inserted(self, buf, location, text, _length):
@@ -576,27 +637,35 @@ class NoteWindow(Adw.Window):
                 # refetch a fresh one from the cursor mark before tagging.
                 fresh_start = buf.get_iter_at_mark(buf.get_insert())
                 fresh_start.set_line_offset(0)
-                self._set_line_bullet_depth(buf, fresh_start, 0)
+                self._set_line_list_depth(buf, fresh_start, "bullet", 0)
+                return
+            if prefix == "[] ":
+                buf.delete(line_start, location)
+                buf.insert(line_start, CHECKBOX_UNCHECKED + " ")
+                fresh_start = buf.get_iter_at_mark(buf.get_insert())
+                fresh_start.set_line_offset(0)
+                self._set_line_list_depth(buf, fresh_start, "checkbox", 0)
                 return
 
         # The hanging-indent tag only ever gets applied to exactly the
-        # bullet marker at the moment it's created -- GTK doesn't
-        # automatically extend a custom tag to text typed afterward. So as
-        # more text is typed into an already-bulleted line, keep
-        # re-covering the *whole* current line with the tag; otherwise only
-        # the marker itself stays tagged and the rest of a wrapped line
-        # loses its hanging indent (confirmed via saved formatting ranges
-        # showing only the 2-char marker tagged despite a full sentence
-        # having been typed after it).
+        # marker at the moment it's created -- GTK doesn't automatically
+        # extend a custom tag to text typed afterward. So as more text is
+        # typed into an already-listed line, keep re-covering the *whole*
+        # current line with the tag; otherwise only the marker itself stays
+        # tagged and the rest of a wrapped line loses its hanging indent
+        # (confirmed via saved formatting ranges showing only the 2-char
+        # marker tagged despite a full sentence having been typed after it).
         fresh_start = buf.get_iter_at_mark(buf.get_insert())
         fresh_start.set_line_offset(0)
         fresh_end = fresh_start.copy()
         fresh_end.forward_to_line_end()
         line_text_now = buf.get_text(fresh_start, fresh_end, False)
-        for glyph in BULLET_GLYPHS:
+        markers = [(g, "bullet") for g in BULLET_GLYPHS]
+        markers += [(CHECKBOX_UNCHECKED, "checkbox"), (CHECKBOX_CHECKED, "checkbox")]
+        for glyph, kind in markers:
             if line_text_now.startswith(glyph + " "):
-                depth = self._bullet_depth_at_iter(fresh_start)
-                self._set_line_bullet_depth(buf, fresh_start, depth)
+                _, depth = self._line_kind_and_depth_at_iter(fresh_start)
+                self._set_line_list_depth(buf, fresh_start, kind, depth)
                 break
 
     def _on_text_key_pressed(self, _controller, keyval, _keycode, state):
@@ -607,12 +676,12 @@ class NoteWindow(Adw.Window):
         line_start = cursor.copy()
         line_start.set_line_offset(0)
         line_text = buf.get_text(line_start, cursor, False)
-        parsed = self._parse_bullet_line(line_start, line_text)
+        parsed = self._parse_list_line(line_start, line_text)
 
         if keyval in (Gdk.KEY_Tab, Gdk.KEY_KP_Tab, Gdk.KEY_ISO_Left_Tab):
             if parsed is None:
                 return False
-            depth, prefix_len = parsed
+            kind, depth, prefix_len = parsed
             outdent = keyval == Gdk.KEY_ISO_Left_Tab or bool(state & Gdk.ModifierType.SHIFT_MASK)
             if outdent:
                 if depth == 0:
@@ -620,68 +689,152 @@ class NoteWindow(Adw.Window):
                 new_depth = depth - 1
             else:
                 new_depth = depth + 1
-            new_glyph = self._bullet_glyph_for_depth(new_depth)
             prefix_start = line_start.copy()
             prefix_end = line_start.copy()
             prefix_end.forward_chars(prefix_len)
+            old_prefix = buf.get_text(prefix_start, prefix_end, False)
+            checked = kind == "checkbox" and old_prefix.startswith(CHECKBOX_CHECKED)
+            new_glyph = self._marker_glyph(kind, new_depth, checked=checked)
             buf.delete(prefix_start, prefix_end)
             buf.insert(prefix_start, new_glyph + " ")
             fresh_start = buf.get_iter_at_mark(buf.get_insert())
             fresh_start.set_line_offset(0)
-            self._set_line_bullet_depth(buf, fresh_start, new_depth)
+            self._set_line_list_depth(buf, fresh_start, kind, new_depth)
             self.text_view.scroll_mark_onscreen(buf.get_insert())
             return True
 
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             if parsed is None:
                 return False
-            depth, prefix_len = parsed
+            kind, depth, prefix_len = parsed
             if line_text[prefix_len:].strip() == "":
-                # Empty bullet -- exit the list by stripping the bullet
-                # marker, staying on this same line (regardless of nesting
-                # depth) rather than also advancing to a new one (returning
-                # True suppresses the default Enter handling, which would
+                # Empty item -- exit the list by stripping the marker,
+                # staying on this same line (regardless of nesting depth)
+                # rather than also advancing to a new one (returning True
+                # suppresses the default Enter handling, which would
                 # otherwise insert a redundant blank line here).
                 buf.delete(line_start, cursor)
-                self._clear_line_bullet_tag(buf, line_start)
+                self._clear_line_list_tag(buf, line_start)
                 self.text_view.scroll_mark_onscreen(buf.get_insert())
                 return True
-            glyph = self._bullet_glyph_for_depth(depth)
+            # A new item always starts unchecked, even if the item it
+            # continues from was checked off.
+            glyph = self._marker_glyph(kind, depth, checked=False)
             buf.insert(cursor, "\n" + glyph + " ")
             new_line_start = buf.get_iter_at_mark(buf.get_insert())
             new_line_start.set_line_offset(0)
-            self._set_line_bullet_depth(buf, new_line_start, depth)
+            self._set_line_list_depth(buf, new_line_start, kind, depth)
             self.text_view.scroll_mark_onscreen(buf.get_insert())
             return True
 
         if keyval == Gdk.KEY_BackSpace:
             if parsed is None:
                 return False
-            depth, prefix_len = parsed
+            kind, depth, prefix_len = parsed
             if len(line_text) != prefix_len:
-                # Cursor isn't right at the start of the bullet's content --
+                # Cursor isn't right at the start of the item's content --
                 # let backspace behave normally (delete the previous char).
                 return False
             prefix_start = line_start.copy()
             if depth == 0:
-                # Top-level bullet -- strip the marker, leaving plain text.
+                # Top-level item -- strip the marker, leaving plain text.
                 buf.delete(prefix_start, cursor)
                 fresh_start = buf.get_iter_at_mark(buf.get_insert())
                 fresh_start.set_line_offset(0)
-                self._clear_line_bullet_tag(buf, fresh_start)
+                self._clear_line_list_tag(buf, fresh_start)
                 self.text_view.scroll_mark_onscreen(buf.get_insert())
                 return True
             new_depth = depth - 1
-            new_glyph = self._bullet_glyph_for_depth(new_depth)
+            checked = kind == "checkbox" and line_text[:prefix_len].startswith(CHECKBOX_CHECKED)
+            new_glyph = self._marker_glyph(kind, new_depth, checked=checked)
             buf.delete(prefix_start, cursor)
             buf.insert(prefix_start, new_glyph + " ")
             fresh_start = buf.get_iter_at_mark(buf.get_insert())
             fresh_start.set_line_offset(0)
-            self._set_line_bullet_depth(buf, fresh_start, new_depth)
+            self._set_line_list_depth(buf, fresh_start, kind, new_depth)
             self.text_view.scroll_mark_onscreen(buf.get_insert())
             return True
 
         return False
+
+    def _checkbox_marker_line_at(self, x, y):
+        """If widget-relative (x, y) is over a checkbox line's marker,
+        returns that line's start iter. Otherwise returns None."""
+        buf = self.text_view.get_buffer()
+        bx, by = self.text_view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(x), int(y))
+        found, it = self.text_view.get_iter_at_location(bx, by)
+        if not found:
+            return None
+        line_start = it.copy()
+        line_start.set_line_offset(0)
+        line_end = line_start.copy()
+        line_end.forward_to_line_end()
+        line_text = buf.get_text(line_start, line_end, False)
+        is_checkbox = (line_text.startswith(CHECKBOX_UNCHECKED + " ")
+                       or line_text.startswith(CHECKBOX_CHECKED + " "))
+        if not is_checkbox or it.get_line_offset() >= 2:
+            # Not a checkbox line, or the position is past the marker (on
+            # the task's own text).
+            return None
+        return line_start
+
+    def _on_checkbox_click_pressed(self, gesture, _n_press, x, y):
+        if not self._auto_bullet_lists:
+            return
+        line_start = self._checkbox_marker_line_at(x, y)
+        if line_start is None:
+            # Leave normal cursor placement alone.
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._toggle_checkbox_line(self.text_view.get_buffer(), line_start)
+
+    def _on_checkbox_motion(self, _controller, x, y):
+        if not self._auto_bullet_lists:
+            return
+        over_checkbox = self._checkbox_marker_line_at(x, y) is not None
+        if over_checkbox == self._checkbox_cursor_active:
+            return
+        self._checkbox_cursor_active = over_checkbox
+        cursor = Gdk.Cursor.new_from_name("pointer") if over_checkbox else None
+        self.text_view.set_cursor(cursor)
+
+    def _toggle_checkbox_line(self, buf, line_start):
+        # Read the depth *before* mutating anything -- the checkbox-depth-N
+        # tag lives on the marker character itself, and a freshly-inserted
+        # character never inherits tags from what used to be there (same
+        # quirk noted below for the checked-style tag). Reading it after
+        # replacing the glyph landed on a tag-less character and silently
+        # fell back to depth 0, which is why toggling a nested item's
+        # checkbox reset it to the root level.
+        _, depth = self._line_kind_and_depth_at_iter(line_start)
+        marker_end = line_start.copy()
+        marker_end.forward_char()
+        currently_checked = buf.get_text(line_start, marker_end, False) == CHECKBOX_CHECKED
+        new_glyph = CHECKBOX_UNCHECKED if currently_checked else CHECKBOX_CHECKED
+        buf.delete(line_start, marker_end)
+        buf.insert(line_start, new_glyph)
+        # line_start was passed directly into both delete() and insert()
+        # above, so GTK guarantees it's revalidated to the edited position.
+        # buf.get_iter_at_mark(buf.get_insert()) -- used elsewhere in this
+        # file for key-press edits, where the mutation genuinely happens at
+        # the text cursor -- is wrong here: a checkbox click can land far
+        # from wherever the cursor was last left, so that mark tracks the
+        # unrelated cursor position, not this click. Using it here caused a
+        # real bug: toggling one item's checkbox applied the "checked"
+        # style to whatever line the cursor happened to be sitting on.
+        line_start.set_line_offset(0)
+        self._set_line_list_depth(buf, line_start, "checkbox", depth)
+
+        text_start = line_start.copy()
+        text_start.forward_chars(2)
+        text_end = line_start.copy()
+        text_end.forward_to_line_end()
+        checked_tag = buf.get_tag_table().lookup("checkbox-checked")
+        if currently_checked:
+            buf.remove_tag(checked_tag, text_start, text_end)
+        else:
+            buf.apply_tag(checked_tag, text_start, text_end)
+        self._queue_autosave()
 
     def _refresh_css(self):
         hex_color = self.note.get("color", storage.DEFAULT_COLOR)
