@@ -128,7 +128,7 @@ class SettingsWindow(Adw.Window):
         layout_page.append(editing_group)
 
         self._add_switch_row(
-            editing_group, "Auto-convert \"- \" to bullet lists",
+            editing_group, "Auto-convert \"- \" to bullets, \"[] \" to checkboxes",
             settings_now.get("auto_bullet_lists", True),
             "auto_bullet_lists", self.app.apply_auto_bullet_setting,
         )
