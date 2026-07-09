@@ -7,6 +7,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
 import storage
+from backup_ui import export_notes_with_picker
 
 
 class NoteManagerWindow(Adw.Window):
@@ -116,9 +117,8 @@ class NoteManagerWindow(Adw.Window):
     def _build_group_expander(self, group_name, notes, open_ids):
         expander = Gtk.Expander()
         expander.set_expanded(True)
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         if group_name:
-            header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-
             name_label = Gtk.EditableLabel(text=group_name)
             name_label.set_hexpand(True)
             name_label.connect("notify::editing", self._on_group_name_editing_changed, group_name)
@@ -129,12 +129,18 @@ class NoteManagerWindow(Adw.Window):
             rename_btn.set_tooltip_text("Rename group")
             rename_btn.connect("clicked", lambda _b, l=name_label: l.start_editing())
             header_box.append(rename_btn)
-
-            expander.set_label_widget(header_box)
         else:
-            label = Gtk.Label()
+            label = Gtk.Label(hexpand=True, xalign=0)
             label.set_markup("<i>ungrouped</i>")
-            expander.set_label_widget(label)
+            header_box.append(label)
+
+        export_btn = Gtk.Button(icon_name="document-save-symbolic")
+        export_btn.add_css_class("flat")
+        export_btn.set_tooltip_text("Export this group")
+        export_btn.connect("clicked", self._on_export_group_clicked, group_name, notes)
+        header_box.append(export_btn)
+
+        expander.set_label_widget(header_box)
 
         inner_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=2,
@@ -151,6 +157,10 @@ class NoteManagerWindow(Adw.Window):
 
     def _on_note_toggled(self, _check, note_id):
         self.app.toggle_note(note_id)
+
+    def _on_export_group_clicked(self, _btn, group_name, notes):
+        default_name = f"nota-{group_name}.json" if group_name else "nota-ungrouped.json"
+        export_notes_with_picker(self, notes, default_name)
 
     def _build_trash_expander(self, notes):
         expander = Gtk.Expander()

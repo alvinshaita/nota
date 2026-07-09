@@ -9,6 +9,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Graphene, Pango
 import settings as settings_module
 import storage
 import x11_utils
+from backup_ui import export_notes_with_picker
 
 AUTOSAVE_DELAY_MS = 800
 
@@ -185,6 +186,12 @@ class NoteWindow(Adw.Window):
         group_btn.add_css_class("flat")
         group_btn.set_popover(self._group_popover)
         toolbar.append(group_btn)
+
+        export_btn = Gtk.Button(icon_name="document-save-symbolic")
+        export_btn.set_tooltip_text("Export this note")
+        export_btn.add_css_class("flat")
+        export_btn.connect("clicked", self._on_export_clicked)
+        toolbar.append(export_btn)
 
         spacer = Gtk.Box(hexpand=True)
         toolbar.append(spacer)
@@ -909,6 +916,11 @@ class NoteWindow(Adw.Window):
         position = x11_utils.get_position(self)
         if position is not None:
             self.note["x"], self.note["y"] = position
+
+    def _on_export_clicked(self, _btn):
+        self.sync_state()
+        safe_title = storage.note_title(self.note).replace("/", "-")
+        export_notes_with_picker(self, [self.note], f"{safe_title}.json")
 
     def _on_close_request(self, *_args):
         self.sync_state()

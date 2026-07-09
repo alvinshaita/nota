@@ -11,6 +11,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib
 
 import autostart
+import backup
 import dbus_common
 import fonts_util
 import settings as settings_module
@@ -394,6 +395,22 @@ class NotaApplication(Adw.Application):
         self.save_all()
         if self.note_manager_window is not None:
             self.note_manager_window._refresh()
+
+    def export_notes_to_file(self, path, notes):
+        backup.write_backup(path, notes)
+
+    def import_backup_from_file(self, path):
+        """Returns the number of notes imported. Raises ValueError/OSError
+        on a bad or unreadable file -- callers should catch and show it."""
+        notes = backup.read_backup(path)
+        imported = backup.notes_for_import(notes)
+        self.notes.extend(imported)
+        for note in imported:
+            self._open_window(note, visible=False)
+        self.save_all()
+        if self.note_manager_window is not None:
+            self.note_manager_window._refresh()
+        return len(imported)
 
     def save_all(self):
         storage.save_notes(self.notes)
