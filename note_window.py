@@ -9,6 +9,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Graphene, Pango
 import settings as settings_module
 import storage
 import x11_utils
+from backup_ui import export_notes_with_picker
 
 AUTOSAVE_DELAY_MS = 800
 
@@ -382,6 +383,17 @@ class NoteWindow(Adw.Window):
         menu_model.append("Italic", "format.italic")
         menu_model.append("Underline", "format.underline")
         menu_model.append("Strikethrough", "format.strikethrough")
+
+        note_action_group = Gio.SimpleActionGroup()
+        export_action = Gio.SimpleAction.new("export", None)
+        export_action.connect("activate", self._on_export_action)
+        note_action_group.add_action(export_action)
+        self.text_view.insert_action_group("note", note_action_group)
+
+        note_section = Gio.Menu()
+        note_section.append("Export Note…", "note.export")
+        menu_model.append_section(None, note_section)
+
         self.text_view.set_extra_menu(menu_model)
 
     def _on_toggle_format(self, _action, _param, tag_name):
@@ -909,6 +921,11 @@ class NoteWindow(Adw.Window):
         position = x11_utils.get_position(self)
         if position is not None:
             self.note["x"], self.note["y"] = position
+
+    def _on_export_action(self, _action, _param):
+        self.sync_state()
+        safe_title = storage.note_title(self.note).replace("/", "-")
+        export_notes_with_picker(self, [self.note], f"{safe_title}.json")
 
     def _on_close_request(self, *_args):
         self.sync_state()

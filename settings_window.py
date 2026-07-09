@@ -5,6 +5,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 import settings as settings_module
+import storage
+from backup_ui import export_notes_with_picker, import_backup_with_picker
 
 LEFT_CLICK_LABELS = {
     "toggle": "Show / hide all notes",
@@ -151,6 +153,34 @@ class SettingsWindow(Adw.Window):
             settings_now.get("trash_retention_days", 7),
             1, 90, 1, 0, "trash_retention_days", None,
         )
+
+        backup_page = self._add_page("backup", "Backup")
+        backup_group = Adw.PreferencesGroup(
+            title="Backup & Restore",
+            description="Export saves a JSON file with all your notes; import adds a backup's notes back in.",
+        )
+        backup_page.append(backup_group)
+
+        export_row = Adw.ActionRow(title="Export all notes…")
+        export_btn = Gtk.Button(icon_name="document-save-symbolic", valign=Gtk.Align.CENTER)
+        export_btn.connect("clicked", self._on_export_all_clicked)
+        export_row.add_suffix(export_btn)
+        export_row.set_activatable_widget(export_btn)
+        backup_group.add(export_row)
+
+        import_row = Adw.ActionRow(title="Import backup…")
+        import_btn = Gtk.Button(icon_name="document-open-symbolic", valign=Gtk.Align.CENTER)
+        import_btn.connect("clicked", self._on_import_clicked)
+        import_row.add_suffix(import_btn)
+        import_row.set_activatable_widget(import_btn)
+        backup_group.add(import_row)
+
+    def _on_export_all_clicked(self, _btn):
+        notes = storage.active_notes(self.app.notes)
+        export_notes_with_picker(self, notes, "nota-backup.json")
+
+    def _on_import_clicked(self, _btn):
+        import_backup_with_picker(self, self.app)
 
     def _add_page(self, name, title):
         box = Gtk.Box(
