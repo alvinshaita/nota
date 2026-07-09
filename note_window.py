@@ -572,22 +572,33 @@ class NoteWindow(Adw.Window):
                     pass
         return None, 0
 
+    def _remove_list_depth_tags(self, buf, line_start, line_end):
+        """Removes any bullet-depth-*/checkbox-depth-* tag from the given
+        range, looked up via the tag table rather than the tags actually
+        present at line_start -- a freshly-inserted character (e.g. right
+        after replacing a checkbox glyph) never inherits the tags of the
+        text it replaced, so checking line_start.get_tags() can miss the
+        very tag that needs removing and leave two depth tags stacked on
+        the same line (confirmed bug: toggling a nested checkbox reset it
+        to the root level because the old depth tag never got cleared).
+        remove_tag is a no-op for tags not present in the range, so this is
+        safe to call unconditionally."""
+        for name in self._all_dynamic_tag_names(buf):
+            if name.startswith("bullet-depth-") or name.startswith("checkbox-depth-"):
+                tag = buf.get_tag_table().lookup(name)
+                if tag is not None:
+                    buf.remove_tag(tag, line_start, line_end)
+
     def _set_line_list_depth(self, buf, line_start, kind, depth):
         line_end = line_start.copy()
         line_end.forward_to_line_end()
-        for tag in list(line_start.get_tags()):
-            name = tag.get_property("name") or ""
-            if name.startswith("bullet-depth-") or name.startswith("checkbox-depth-"):
-                buf.remove_tag(tag, line_start, line_end)
+        self._remove_list_depth_tags(buf, line_start, line_end)
         buf.apply_tag(self._list_tag_for_depth(kind, depth), line_start, line_end)
 
     def _clear_line_list_tag(self, buf, line_start):
         line_end = line_start.copy()
         line_end.forward_to_line_end()
-        for tag in list(line_start.get_tags()):
-            name = tag.get_property("name") or ""
-            if name.startswith("bullet-depth-") or name.startswith("checkbox-depth-"):
-                buf.remove_tag(tag, line_start, line_end)
+        self._remove_list_depth_tags(buf, line_start, line_end)
         checked_tag = buf.get_tag_table().lookup("checkbox-checked")
         if checked_tag is not None:
             buf.remove_tag(checked_tag, line_start, line_end)
@@ -788,6 +799,14 @@ class NoteWindow(Adw.Window):
         self.text_view.set_cursor(cursor)
 
     def _toggle_checkbox_line(self, buf, line_start):
+        # Read the depth *before* mutating anything -- the checkbox-depth-N
+        # tag lives on the marker character itself, and a freshly-inserted
+        # character never inherits tags from what used to be there (same
+        # quirk noted below for the checked-style tag). Reading it after
+        # replacing the glyph landed on a tag-less character and silently
+        # fell back to depth 0, which is why toggling a nested item's
+        # checkbox reset it to the root level.
+        _, depth = self._line_kind_and_depth_at_iter(line_start)
         marker_end = line_start.copy()
         marker_end.forward_char()
         currently_checked = buf.get_text(line_start, marker_end, False) == CHECKBOX_CHECKED
@@ -804,7 +823,6 @@ class NoteWindow(Adw.Window):
         # real bug: toggling one item's checkbox applied the "checked"
         # style to whatever line the cursor happened to be sitting on.
         line_start.set_line_offset(0)
-        _, depth = self._line_kind_and_depth_at_iter(line_start)
         self._set_line_list_depth(buf, line_start, "checkbox", depth)
 
         text_start = line_start.copy()
