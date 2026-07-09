@@ -1,0 +1,16 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Nota
+Source: https://github.com/alvinshaita/nota
+
+Files: *
+Copyright: 2026 Alvin Shaita
+License: proprietary
+ All rights reserved by the author. This package is not currently released
+ under an open-source license.
+
+Files: fonts/Virgil-Regular.ttf
+Copyright: 2021 - Present, Ellinor Rapp
+License: OFL-1.1
+ Licensed under the SIL Open Font License, Version 1.1. The full license
+ text is installed alongside this file as VIRGIL-LICENSE.md, and is also
+ available at https://scripts.sil.org/OFL.

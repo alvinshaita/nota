@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 *.nt
 nota.desktop
+build/
+*.deb
