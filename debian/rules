@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Pure Python -- nothing to compile.
+
+override_dh_auto_install:
+	mkdir -p debian/nota/usr/bin
+	mkdir -p debian/nota/usr/lib/nota/fonts
+	mkdir -p debian/nota/usr/share/applications
+	for size in 16 24 32 48 256; do \
+		mkdir -p debian/nota/usr/share/icons/hicolor/$${size}x$${size}/apps; \
+	done
+	cp *.py debian/nota/usr/lib/nota/
+	cp fonts/Virgil-Regular.ttf debian/nota/usr/lib/nota/fonts/
+	install -m 755 packaging/deb/nota-launcher debian/nota/usr/bin/nota
+	cp packaging/deb/nota.desktop debian/nota/usr/share/applications/nota.desktop
+	for size in 16 24 32 48 256; do \
+		cp icons/nota-$${size}.png debian/nota/usr/share/icons/hicolor/$${size}x$${size}/apps/nota.png; \
+	done
