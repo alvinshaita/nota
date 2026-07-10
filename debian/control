@@ -1,0 +1,15 @@
+Source: nota
+Section: utils
+Priority: optional
+Maintainer: alvinshaita <alvinshaita@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/alvinshaita/nota
+
+Package: nota
+Architecture: all
+Depends: ${misc:Depends}, python3, python3-gi, python3-xlib, gir1.2-gtk-4.0, gir1.2-gtk-3.0, gir1.2-adw-1
+Description: Simple sticky notes for the Linux desktop
+ Nota is a GTK4/libadwaita sticky-notes app with a tray icon, inspired by
+ xpad. Supports rich text formatting, nested bullet and checkbox lists,
+ note groups, a recoverable trash, and note backup/export.

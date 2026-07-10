@@ -29,11 +29,7 @@ cp -r "$REPO_DIR/fonts" "$STAGING/usr/lib/nota/fonts"
 rm -f "$STAGING/usr/lib/nota/fonts/VIRGIL-LICENSE.md"
 
 # --- Launcher on PATH ------------------------------------------------------
-cat > "$STAGING/usr/bin/nota" <<'LAUNCHER'
-#!/bin/sh
-exec python3 /usr/lib/nota/main.py "$@"
-LAUNCHER
-chmod 755 "$STAGING/usr/bin/nota"
+install -m 755 "$REPO_DIR/packaging/deb/nota-launcher" "$STAGING/usr/bin/nota"
 
 # --- Desktop entry + icons -------------------------------------------------
 cp "$REPO_DIR/packaging/deb/nota.desktop" "$STAGING/usr/share/applications/nota.desktop"
