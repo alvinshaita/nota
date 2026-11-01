@@ -8,6 +8,12 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_NAME="nota"
 VERSION="$(cat "$REPO_DIR/VERSION")"
+CHANGELOG_VERSION="$(sed -nE '1s/^[^ ]+ \(([^)]+)\).*/\1/p' "$REPO_DIR/debian/changelog")"
+if [ "$VERSION" != "$CHANGELOG_VERSION" ]; then
+    echo "Version mismatch: VERSION says $VERSION, debian/changelog says $CHANGELOG_VERSION." >&2
+    echo "Bump both together so the .deb and the PPA build agree." >&2
+    exit 1
+fi
 BUILD_ROOT="$REPO_DIR/build/deb"
 STAGING="$BUILD_ROOT/${PKG_NAME}_${VERSION}_all"
 
@@ -47,7 +53,19 @@ sed "s/__VERSION__/$VERSION/" "$REPO_DIR/packaging/deb/control.template" \
     > "$STAGING/DEBIAN/control"
 cp "$REPO_DIR/packaging/deb/postinst" "$STAGING/DEBIAN/postinst"
 cp "$REPO_DIR/packaging/deb/postrm" "$STAGING/DEBIAN/postrm"
-chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/postrm"
+
+# --- Permissions --------------------------------------------------------
+# cp carries over the working tree's modes (group-writable, or even 777),
+# which would end up on the installed files and directories -- including
+# shared ones like /usr/bin. Normalize to the standard 755 dirs / 644 files,
+# then mark the few real executables.
+find "$STAGING" -type d -exec chmod 0755 {} +
+find "$STAGING" -type f -exec chmod 0644 {} +
+chmod 0755 "$STAGING/usr/bin/nota" "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/postrm"
+
+# Shown by apt/dpkg as the package's installed size (in KiB).
+echo "Installed-Size: $(du -sk --exclude=DEBIAN "$STAGING" | cut -f1)" \
+    >> "$STAGING/DEBIAN/control"
 
 # --- Build --------------------------------------------------------------
 OUT="$REPO_DIR/${PKG_NAME}_${VERSION}_all.deb"

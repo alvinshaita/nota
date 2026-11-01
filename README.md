@@ -13,12 +13,29 @@
 
 ## Requirements
 
-- Python 3
+- Python 3 with PyGObject
 - GTK4, GTK3, and libadwaita GObject-introspection typelibs
-  (Debian/Ubuntu: `sudo apt install gir1.2-gtk-4.0 gir1.2-gtk-3.0 gir1.2-adw-1`)
-- [`python-xlib`](https://pypi.org/project/python-xlib/) (`pip install --user python-xlib`)
+- [`python-xlib`](https://pypi.org/project/python-xlib/)
 
-## Install (recommended)
+On Debian/Ubuntu these are all distro packages (the `.deb` below pulls them
+in automatically):
+
+```bash
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-gtk-3.0 gir1.2-adw-1 python3-xlib
+```
+
+## Install from a `.deb` (Debian/Ubuntu)
+
+```bash
+./build-deb.sh                              # produces nota_<version>_all.deb
+sudo apt install ./nota_<version>_all.deb
+```
+
+Use `apt install ./<file>.deb` rather than `dpkg -i`: apt also installs the
+dependencies listed above. Nota then appears in your application menu, and
+`nota` is on your `PATH`.
+
+## Install from a checkout
 
 ```bash
 ./install.sh
@@ -26,9 +43,8 @@
 
 This is safe to re-run any time (e.g. after moving the repo). It:
 
-- checks for the GTK4/GTK3/libadwaita typelibs above and tells you what's
-  missing if any aren't installed
-- installs `python-xlib` for the current user if it isn't already present
+- checks for the system packages above and prints the `apt install` command
+  for any that are missing
 - installs the app icon into `~/.local/share/icons/hicolor/*/apps/nota.png`
   (all standard sizes) so it shows up regardless of your system's icon theme
 - generates `~/.local/share/applications/nota.desktop` with `Exec=` pointing
@@ -50,9 +66,12 @@ cp icons/nota-48.png  ~/.local/share/icons/hicolor/48x48/apps/nota.png
 cp icons/nota-256.png ~/.local/share/icons/hicolor/256x256/apps/nota.png
 ```
 
-**2. Add the desktop entry** so it shows up in your application menu:
+**2. Add the desktop entry** so it shows up in your application menu. Start
+from the template and point its `Exec=` line at this checkout:
 
 ```bash
+cp nota.desktop.example nota.desktop
+# edit nota.desktop: Exec=python3 "/absolute/path/to/nota/main.py"
 mkdir -p ~/.local/share/applications
 cp nota.desktop ~/.local/share/applications/nota.desktop
 ```
@@ -64,16 +83,47 @@ reflecting edits to the repo's copy of `nota.desktop` without re-copying:
 ln -sf "$(pwd)/nota.desktop" ~/.local/share/applications/nota.desktop
 ```
 
-Note that `nota.desktop`'s `Exec=` line is a plain absolute path (Desktop
+Note that `nota.desktop`'s `Exec=` line needs a plain absolute path (Desktop
 Entry files aren't run through a shell, so `~` and `$HOME` don't expand
-there) — if you move the repo, update that path to match, or just re-run
-`install.sh`, which regenerates it automatically.
+there; keep the double quotes if the path contains spaces) — if you move the
+repo, update that path to match, or just re-run `install.sh`, which
+regenerates it automatically.
 
 If the icon doesn't show up right away, try refreshing the icon cache:
 
 ```bash
 gtk-update-icon-cache -f ~/.local/share/icons/hicolor
 ```
+
+## Uninstall
+
+- **`.deb`:** `sudo apt remove nota`
+- **Checkout install:**
+
+  ```bash
+  rm -f ~/.local/share/applications/nota.desktop
+  rm -f ~/.local/share/icons/hicolor/*/apps/nota.png
+  ```
+
+Nota also creates these per-user files, which neither of the above removes:
+
+- `~/.config/autostart/nota.desktop` — the "start on login" entry (toggle it
+  in Settings). After `apt remove` it's skipped automatically; for a checkout
+  install, delete it or switch the setting off before removing.
+- `~/.local/share/fonts/nota/` — the bundled Virgil font.
+- `~/.local/share/nota/` and `~/.config/nota/` — your notes and settings.
+  Only delete these if you don't want to keep your notes.
+
+## Building packages
+
+- `./build-deb.sh` builds the standalone `.deb` described above (needs only
+  `dpkg-deb`).
+- `./build-ppa.sh` builds a signed source package for a Launchpad PPA from the
+  committed `HEAD` (commit first — uncommitted changes aren't included). Add
+  `--upload ppa:<user>/nota` to upload, or `--no-sign` for a local test build.
+  See the script header for prerequisites.
+- Bump `VERSION` and `debian/changelog` together; both scripts refuse to
+  build if they disagree.
 
 ## Development notes
 

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Nota
+Comment=Simple sticky notes for the desktop
+Exec=/usr/bin/nota
+Icon=nota
+Terminal=false
+Categories=Utility;
+StartupWMClass=com.github.nota

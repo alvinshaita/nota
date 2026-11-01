@@ -6,13 +6,27 @@ from pathlib import Path
 AUTOSTART_DIR = Path.home() / ".config" / "autostart"
 AUTOSTART_FILE = AUTOSTART_DIR / "nota.desktop"
 
-REPO_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(__file__).resolve().parent
+
+# Where the .deb (build-deb.sh / debian/rules) puts the app and its launcher.
+PACKAGED_APP_DIR = Path("/usr/lib/nota")
+PACKAGED_LAUNCHER = Path("/usr/bin/nota")
+
+if APP_DIR == PACKAGED_APP_DIR:
+    # This per-user file outlives `apt remove nota`. TryExec makes the session
+    # skip the entry once the launcher is gone, rather than failing on every
+    # login.
+    EXEC_LINES = f"TryExec={PACKAGED_LAUNCHER}\nExec={PACKAGED_LAUNCHER} --autostart"
+else:
+    # Running from a checkout. Exec= isn't run through a shell, so the path is
+    # quoted in case it contains spaces.
+    EXEC_LINES = f'Exec=python3 "{APP_DIR / "main.py"}" --autostart'
 
 DESKTOP_ENTRY = f"""[Desktop Entry]
 Type=Application
 Name=Nota
 Comment=Simple sticky notes for the desktop
-Exec=python3 {REPO_DIR}/main.py --autostart
+{EXEC_LINES}
 Icon=nota
 Terminal=false
 X-GNOME-Autostart-enabled=true

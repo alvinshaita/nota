@@ -1,7 +1,9 @@
 __pycache__/
 *.pyc
 *.nt
-nota.desktop
+# Machine-specific copy of nota.desktop.example (README manual setup).
+# Anchored to the root so packaging/deb/nota.desktop stays tracked.
+/nota.desktop
 build/
 *.deb
 debian/nota/
