@@ -38,7 +38,7 @@ class NotaApplication(Adw.Application):
         self._launched_via_autostart = launched_via_autostart
         self.notes = []
         self.windows = {}
-        self.notes_visible = True
+        self._notes_loaded = False
         self.settings_window = None
         self.note_manager_window = None
         self._tray_process = None
@@ -55,6 +55,11 @@ class NotaApplication(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        # GTK quits an app once it has no windows left. Nota lives in the tray,
+        # and every note can legitimately be gone (all deleted/trashed, with
+        # the note manager closed), so keep running until an explicit Quit
+        # (tray menu / D-Bus), which ends the app regardless of this hold.
+        self.hold()
         fonts_util.ensure_installed()
         autostart.sync(settings_module.load_settings().get("autostart", True))
         self._launch_tray()
@@ -62,25 +67,35 @@ class NotaApplication(Adw.Application):
         GLib.timeout_add_seconds(TRASH_PURGE_CHECK_INTERVAL_SECONDS, self._periodic_purge)
 
     def do_activate(self):
-        if not self.windows:
-            self.notes = storage.load_notes()
-            if not self.notes:
-                self.notes = [storage.new_note(text="Welcome to Nota! Type here.")]
-            retention_days = settings_module.load_settings().get(
-                "trash_retention_days", storage.TRASH_RETENTION_DAYS
-            )
-            purged = storage.purge_expired(self.notes, days=retention_days)
-            if len(purged) != len(self.notes):
-                self.notes = purged
-                self.save_all()
-            active = storage.active_notes(self.notes)
-            if self._launched_via_autostart:
-                target = set()
-            else:
-                saved = settings_module.load_settings().get("open_note_ids")
-                target = set(saved) if saved is not None else {n["id"] for n in active}
-            for note in active:
-                self._open_window(note, visible=note["id"] in target)
+        # Runs on the first launch, and again in this (primary) process each
+        # time Nota is launched while already running -- from the app menu,
+        # `nota`, etc. A repeat launch means "show me my notes", so do that
+        # rather than nothing. (Checking self.windows instead of a flag
+        # wouldn't work: it holds hidden notes' windows too, and is empty when
+        # every note is in the trash.)
+        if self._notes_loaded:
+            self.show_notes()
+            return
+        self._notes_loaded = True
+
+        self.notes = storage.load_notes()
+        if not self.notes:
+            self.notes = [storage.new_note(text="Welcome to Nota! Type here.")]
+        retention_days = settings_module.load_settings().get(
+            "trash_retention_days", storage.TRASH_RETENTION_DAYS
+        )
+        purged = storage.purge_expired(self.notes, days=retention_days)
+        if len(purged) != len(self.notes):
+            self.notes = purged
+            self.save_all()
+        # Every active note gets a window up front (hidden ones included), so
+        # showing/hiding later is just toggling visibility.
+        for note in storage.active_notes(self.notes):
+            self._open_window(note, visible=False)
+        # At login Nota starts hidden in the tray; launched by hand, it shows
+        # the notes.
+        if not self._launched_via_autostart:
+            self.show_notes()
 
     def do_dbus_register(self, connection, object_path):
         if not Adw.Application.do_dbus_register(self, connection, object_path):
@@ -139,16 +154,31 @@ class NotaApplication(Adw.Application):
             self.create_note()
 
     def toggle_visibility(self):
-        self.notes_visible = not self.notes_visible
-        if self.notes_visible:
-            saved = settings_module.load_settings().get("open_note_ids")
-            target = saved if saved is not None else [n["id"] for n in self.notes]
-            self._apply_visible_set(target)
+        # Decided from what's actually on screen, not a remembered flag: a
+        # flag goes stale whenever notes are shown or hidden some other way
+        # (starting hidden at login, closing notes one by one), and then a
+        # click does nothing.
+        if self._currently_visible_ids():
+            self.close_all_notes()
         else:
-            for window in self.windows.values():
-                window.sync_state()
-                window.set_visible(False)
-            self.save_all()
+            self.show_notes()
+
+    def show_notes(self):
+        """Brings the user's notes up: raises any already showing; otherwise
+        shows the ones open last time -- or every note, if that set is empty
+        (they were all closed one by one) or stale. With no notes outside
+        the trash, opens the note manager so there's still something to see."""
+        visible = self._currently_visible_ids()
+        if visible:
+            for note_id in visible:
+                self.windows[note_id].present()
+            return
+        if not self.windows:
+            self.show_note_manager()
+            return
+        saved = settings_module.load_settings().get("open_note_ids") or []
+        target = {i for i in saved if i in self.windows} or set(self.windows)
+        self._apply_visible_set(target)
 
     def _currently_visible_ids(self):
         return [
@@ -184,7 +214,6 @@ class NotaApplication(Adw.Application):
             elif was_visible:
                 window.sync_state()
                 window.set_visible(False)
-        self.notes_visible = True
         self._persist_open_ids(target_set)
         self.save_all()
         if self.note_manager_window is not None:
@@ -201,7 +230,6 @@ class NotaApplication(Adw.Application):
         for window in self.windows.values():
             window.sync_state()
             window.set_visible(False)
-        self.notes_visible = False
         self.save_all()
 
     def open_group_only(self, group):
@@ -345,7 +373,6 @@ class NotaApplication(Adw.Application):
         note = storage.new_note(x=x, y=y, width=width, height=height)
         self.notes.append(note)
         self._open_window(note)
-        self.notes_visible = True
         self.sync_open_ids()
         self.save_all()
 

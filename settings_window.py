@@ -156,7 +156,7 @@ class SettingsWindow(Adw.Window):
 
         backup_page = self._add_page("backup", "Backup")
         backup_group = Adw.PreferencesGroup(
-            title="Backup & Restore",
+            title="Backup &amp; Restore",  # titles are Pango markup: & must be escaped
             description="Export saves a JSON file with all your notes; import adds a backup's notes back in.",
         )
         backup_page.append(backup_group)
