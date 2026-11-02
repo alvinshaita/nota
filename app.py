@@ -147,7 +147,8 @@ class NotaApplication(Adw.Application):
         self._tray_process = subprocess.Popen([sys.executable, str(tray_path)])
 
     def handle_left_click(self):
-        action = settings_module.load_settings().get("left_click_action", "toggle")
+        # ("menu" never gets here: the tray opens its own menu for that.)
+        action = settings_module.load_settings().get("left_click_action")
         if action == "toggle":
             self.toggle_visibility()
         elif action == "new_note":

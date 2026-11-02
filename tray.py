@@ -47,8 +47,14 @@ def call(proxy, method_name, arg=None):
         print(f"nota tray: D-Bus call {method_name} failed: {e}")
 
 
-def on_activate(_icon, proxy):
-    call(proxy, "LeftClickActivate")
+def on_activate(icon, proxy):
+    action = settings_module.load_settings().get("left_click_action")
+    if action == "menu":
+        # Same menu as a right-click. The menu lives in this process, so open
+        # it here rather than round-tripping through the app.
+        on_popup_menu(icon, 1, Gtk.get_current_event_time(), proxy)
+    else:
+        call(proxy, "LeftClickActivate")
 
 
 def _add_note_items(menu, notes, proxy, open_ids):

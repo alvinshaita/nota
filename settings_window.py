@@ -9,6 +9,7 @@ import storage
 from backup_ui import export_notes_with_picker, import_backup_with_picker
 
 LEFT_CLICK_LABELS = {
+    "menu": "Open the tray menu",
     "toggle": "Show / hide all notes",
     "new_note": "Create a new note",
     "nothing": "Do nothing",
@@ -54,7 +55,9 @@ class SettingsWindow(Adw.Window):
             model.append(LEFT_CLICK_LABELS[action])
         combo.set_model(model)
 
-        current = settings_now.get("left_click_action", "toggle")
+        current = settings_now.get(
+            "left_click_action", settings_module.DEFAULT_SETTINGS["left_click_action"]
+        )
         combo.set_selected(actions.index(current) if current in actions else 0)
         combo.connect("notify::selected", self._on_left_click_changed, actions)
         tray_group.add(combo)

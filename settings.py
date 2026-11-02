@@ -5,7 +5,9 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "nota"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
 
-LEFT_CLICK_ACTIONS = ["toggle", "new_note", "nothing"]
+# "menu" is handled inside the tray process (it owns the menu); the rest are
+# sent to the app over D-Bus. Order = order shown in Settings.
+LEFT_CLICK_ACTIONS = ["menu", "toggle", "new_note", "nothing"]
 
 # key -> CSS font-family value (None = don't override, use the app's default)
 FONT_CHOICES = {
@@ -21,7 +23,7 @@ FONT_LABELS = {
 # changed (via a tray menu action or a note's own close button). None means
 # "no preference recorded yet" -- defaults to showing every note.
 DEFAULT_SETTINGS = {
-    "left_click_action": "toggle",
+    "left_click_action": "menu",
     "font_family": "system",
     "open_note_ids": None,
     "pixels_above_lines": 0,
