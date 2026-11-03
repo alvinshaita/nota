@@ -1,7 +1,15 @@
-# Nota
+<p align="center">
+  <img src="icons/nota-256.png" alt="Nota logo" width="128" height="128">
+</p>
 
-Simple GTK4/libadwaita sticky notes for the Linux desktop, with a tray icon
-for quick access.
+<h1 align="center">Nota</h1>
+
+<p align="center">
+  Simple GTK4/libadwaita sticky notes for the Linux desktop, with a tray icon
+  for quick access.
+</p>
+
+---
 
 ## Requirements
 
