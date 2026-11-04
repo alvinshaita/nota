@@ -9,6 +9,10 @@
   for quick access.
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/note.png" alt="A Nota sticky note with a TODO checklist, one item ticked off and struck through" width="360">
+</p>
+
 ---
 
 ## Requirements
